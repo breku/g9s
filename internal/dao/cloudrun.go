@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
@@ -78,15 +77,6 @@ func rowFromService(svc *runpb.Service) Row {
 	}
 }
 
-// lastSegment returns the last "/" segment of a resource name.
-func lastSegment(name string) string {
-	parts := strings.Split(name, "/")
-	if len(parts) == 0 {
-		return name
-	}
-	return parts[len(parts)-1]
-}
-
 // locationFromName extracts the location/region from a fully-qualified name.
 // Format: projects/{p}/locations/{location}/services/{service}
 func locationFromName(name string) string {
@@ -113,12 +103,4 @@ func conditionState(c *runpb.Condition) string {
 	default:
 		return "Unknown"
 	}
-}
-
-// formatTime formats a time.Time as "2006-01-02 15:04" or "—" if zero.
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return "—"
-	}
-	return t.UTC().Format("2006-01-02 15:04")
 }
