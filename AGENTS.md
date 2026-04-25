@@ -27,6 +27,7 @@ internal/
   dao/
     types.go                 – Accessor interface + optional capability interfaces (Describer, …)
     cloudrun.go              – Cloud Run v2 DAO (implements Accessor)
+    cloudbuild.go            – Cloud Build triggers DAO (implements Accessor)
   gcp/client.go              – ADC credential helper, shared option.ClientOption slice
   model/
     types.go                 – TableListener observer interface + ResourceMeta struct
@@ -34,8 +35,11 @@ internal/
     table.go                 – Table model: polling loop, cache-first refresh, observer fan-out
   ui/
     app.go                   – tview.Application wrapper, root layout, key bindings
+    views.go                 – ResourceView + Filterable interfaces, newResourceView() factory
     table.go                 – ResourceTable: reusable tview.Table widget, Render(TableData)
-    cloudrun.go              – CloudRunView: implements TableListener, drives ResourceTable
+    cmdbar.go                – CmdBar: ':' command / '/' filter input with native dropdown autocomplete
+    cloudrun.go              – CloudRunView: implements ResourceView
+    cloudbuild.go            – CloudBuildView: implements ResourceView
 .goreleaser.yaml             – multi-platform builds + Homebrew tap formula
 Makefile                     – build / run / test / lint / tidy / release-dry-run targets
 ```
@@ -46,7 +50,7 @@ g9s mirrors the k9s three-layer pattern, adapted for GCP's poll-based APIs:
 
 ```
 Key press
-  └─ app.show<Resource>()        (main goroutine — no blocking, no QueueUpdateDraw)
+  └─ app.showResource(key)       (main goroutine — no blocking, no QueueUpdateDraw)
        ├─ render loading state directly (safe: already on main goroutine)
        ├─ mount tview page
        └─ go model.Table.Watch() (background goroutine)
@@ -63,7 +67,7 @@ Key press
 - `Accessor` is the single required interface: `Resource()`, `Header()`, `List(ctx, project)`.
 - Optional capability interfaces (`Describer`, etc.) are added per-resource and discovered via runtime type assertion.
 - Each DAO owns its own GCP client construction via `gcp.ClientOptions(ctx)` (ADC).
-- One file per resource type: `cloudrun.go`, future: `gce.go`, `gcs.go`, etc.
+- One file per resource type: `cloudrun.go`, `cloudbuild.go`, future: `gce.go`, `gcs.go`, etc.
 
 ### Layer 2 — Model (`internal/model/`)
 
@@ -75,18 +79,21 @@ Key press
 
 TTLs are set per resource type in `model/registry.go`:
 
-| Resource   | TTL  | Rationale                                              |
-|------------|------|--------------------------------------------------------|
-| `cloudrun` | 60 s | Services are long-lived; List calls are quota-weighted |
+| Resource     | TTL  | Rationale                                              |
+|--------------|------|--------------------------------------------------------|
+| `cloudrun`   | 60 s | Services are long-lived; List calls are quota-weighted |
+| `cloudbuild` | 30 s | Triggers change more often; API calls are lightweight  |
 
 When adding a new resource, choose a TTL based on change frequency, API quota cost, and user expectation of data freshness.
 
 ### Layer 3 — View (`internal/ui/`)
 
+- `ResourceView` is the common interface all resource views implement: `Primitive()`, `Watch(ctx)`, `RenderLoading()`, plus `Filterable` and `TableListener`. Defined in `views.go`.
+- `newResourceView()` in `views.go` is the factory that maps a registry key to the correct view constructor.
 - `ResourceTable` is a reusable `tview.Table` wrapper with a `Render(*dao.TableData)` method and status-aware row colouring.
-- Each resource has its own view struct (e.g. `CloudRunView`) that embeds `ResourceTable` and implements `model.TableListener`.
+- Each resource has its own view struct (e.g. `CloudRunView`, `CloudBuildView`) that embeds `ResourceTable` and implements `ResourceView`.
 - `TableDataChanged` and `TableLoadFailed` always dispatch to tview via `QueueUpdateDraw` — they are called from background goroutines.
-- `app.show<Resource>()` is always called on the main goroutine and must never call `QueueUpdateDraw` or block.
+- `app.showResource(key)` is the single generic routing method — called on the main goroutine, must never call `QueueUpdateDraw` or block.
 
 ## Build & Run Commands
 
@@ -119,7 +126,7 @@ Key flags: `--project`, `--log-level`, `--config`
 ## Adding a New GCP Resource View
 
 1. Add a DAO in `internal/dao/<resource>.go` implementing `dao.Accessor`. Implement optional interfaces (`Describer`, etc.) as needed.
-2. Register the resource in `internal/model/registry.go` with an appropriate TTL.
-3. Add a view in `internal/ui/<resource>.go` embedding `ResourceTable` and implementing `model.TableListener`.
-4. Add a `show<Resource>()` method in `internal/ui/app.go` and bind it to a key in the input capture handler.
+2. Register the resource in `internal/model/registry.go` with an appropriate TTL and aliases.
+3. Add a view in `internal/ui/<resource>.go` embedding `ResourceTable` and implementing `ResourceView`.
+4. Add a case to `newResourceView()` in `internal/ui/views.go` — no changes to `app.go` needed.
 5. Optionally add a cobra sub-command in `cmd/<resource>.go` for non-interactive use.
