@@ -3,6 +3,7 @@ package ui
 
 import (
 	"context"
+	"strings"
 
 	"github.com/brekol/g9s/internal/config"
 	"github.com/gdamore/tcell/v2"
@@ -12,47 +13,67 @@ import (
 
 // App wraps tview.Application with g9s state.
 type App struct {
-	tview  *tview.Application
-	pages  *tview.Pages
-	cfg    *config.Config
-	ctx    context.Context
-	cancel context.CancelFunc
+	tview       *tview.Application
+	pages       *tview.Pages
+	root        *tview.Flex
+	cmdbar      *CmdBar
+	cmdbarShown bool
+	cfg         *config.Config
+	ctx         context.Context
+	cancel      context.CancelFunc
+
+	// activeView is the currently displayed resource view, if it implements
+	// Filterable. Used to forward filter keystrokes.
+	activeView Filterable
 }
 
 // New creates and initialises a new App.
 func New(cfg *config.Config) *App {
 	tv := tview.NewApplication()
 	pages := tview.NewPages()
-
 	ctx, cancel := context.WithCancel(context.Background())
+
+	cmdbar := NewCmdBar()
 
 	a := &App{
 		tview:  tv,
 		pages:  pages,
+		cmdbar: cmdbar,
 		cfg:    cfg,
 		ctx:    ctx,
 		cancel: cancel,
 	}
 
-	// Root layout: header bar + main content area
+	// Wire cmdbar callbacks — all called on the main goroutine by tview.
+	cmdbar.OnCommand(a.handleCommand)
+	cmdbar.OnFilter(a.handleFilter)
+	cmdbar.OnDismiss(a.hideCmdBar)
+
+	// Root layout: header | pages
+	// The cmdbar row is inserted/removed dynamically between header and pages.
+	project := cfg.Project
+	if project == "" {
+		project = "[red](no project set)"
+	}
+
 	header := tview.NewTextView().
-		SetText(" g9s — GCP Terminal Dashboard ").
+		SetText(" [white]g9s[darkgray] │ [yellow]project:[white] " + project + " ").
 		SetTextAlign(tview.AlignLeft).
 		SetDynamicColors(true)
 	header.SetBackgroundColor(tcell.ColorDarkBlue)
 
 	help := tview.NewTextView().
-		SetText(" <q> quit  <r> Cloud Run ").
+		SetText("  <:> command  </> filter  <q> quit ").
 		SetTextAlign(tview.AlignRight).
 		SetDynamicColors(true)
 	help.SetBackgroundColor(tcell.ColorDarkBlue)
 
 	headerRow := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(header, 0, 1, false).
-		AddItem(help, 30, 0, false)
+		AddItem(help, 38, 0, false)
 
 	placeholder := tview.NewTextView().
-		SetText("\n  Press <r> to view Cloud Run services.").
+		SetText("\n  Press [yellow]:[white] and type a resource name (e.g. [yellow]run[white]) to navigate.\n  Press [yellow]/[white] to filter the active view.").
 		SetDynamicColors(true)
 	pages.AddPage("home", placeholder, true, true)
 
@@ -60,15 +81,29 @@ func New(cfg *config.Config) *App {
 		AddItem(headerRow, 1, 0, false).
 		AddItem(pages, 0, 1, true)
 
+	a.root = root
+
 	tv.SetRoot(root, true).EnableMouse(true)
 
 	tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch {
-		case event.Rune() == 'q' || event.Key() == tcell.KeyCtrlC:
+		// Let the cmdbar consume all input when it is focused.
+		if cmdbar.HasFocus() {
+			return event
+		}
+
+		switch event.Rune() {
+		case 'q':
 			a.stop()
 			return nil
-		case event.Rune() == 'r':
-			a.showCloudRun()
+		case ':':
+			a.showCmdBar(modeCommand)
+			return nil
+		case '/':
+			a.showCmdBar(modeFilter)
+			return nil
+		}
+		if event.Key() == tcell.KeyCtrlC {
+			a.stop()
 			return nil
 		}
 		return event
@@ -88,8 +123,54 @@ func (a *App) stop() {
 	a.tview.Stop()
 }
 
+// showCmdBar inserts the command bar into the layout at row 1 (below the
+// header), sets its mode, and focuses it. Safe to call if already shown.
+func (a *App) showCmdBar(mode cmdMode) {
+	if mode == modeCommand {
+		a.cmdbar.ActivateCommand()
+	} else {
+		a.cmdbar.ActivateFilter()
+	}
+	if !a.cmdbarShown {
+		// Insert between header (index 0) and pages (index 1).
+		// RemoveItem+re-add pages so the cmdbar sits at index 1.
+		a.root.RemoveItem(a.pages)
+		a.root.AddItem(a.cmdbar, 3, 0, false)
+		a.root.AddItem(a.pages, 0, 1, false)
+		a.cmdbarShown = true
+	}
+	a.tview.SetFocus(a.cmdbar)
+}
+
+// hideCmdBar removes the command bar from the layout and returns focus to pages.
+func (a *App) hideCmdBar() {
+	if a.cmdbarShown {
+		a.root.RemoveItem(a.cmdbar)
+		a.cmdbarShown = false
+	}
+	a.tview.SetFocus(a.pages)
+}
+
+// handleCommand is called when the user submits a ':' command.
+func (a *App) handleCommand(text string) {
+	switch strings.TrimSpace(strings.ToLower(text)) {
+	case "run", "cloudrun", "cloud-run":
+		a.showCloudRun()
+	default:
+		log.Warn().Str("cmd", text).Msg("unknown resource command")
+	}
+}
+
+// handleFilter is called on every keystroke in '/' mode.
+// It forwards the filter string to the active view if it supports filtering.
+func (a *App) handleFilter(text string) {
+	if a.activeView != nil {
+		a.activeView.SetFilter(text)
+	}
+}
+
 // showCloudRun navigates to the Cloud Run view, creating it on first call.
-// Called from the tview input handler (main goroutine) — must not block.
+// Called on the main goroutine — must not block.
 func (a *App) showCloudRun() {
 	const pageName = "cloudrun"
 
@@ -99,6 +180,7 @@ func (a *App) showCloudRun() {
 			SetText("\n  [red]No GCP project set.[white] Use --project flag or G9S_PROJECT env var.").
 			SetDynamicColors(true)
 		a.pages.AddAndSwitchToPage(pageName, tv, true)
+		a.activeView = nil
 		return
 	}
 
@@ -109,12 +191,10 @@ func (a *App) showCloudRun() {
 	}
 
 	view := NewCloudRunView(a, a.cfg.Project)
-	// Show the loading state immediately — we are on the main goroutine,
-	// so direct tview mutation is safe (no QueueUpdateDraw needed).
 	view.renderLoading()
 	a.pages.AddAndSwitchToPage(pageName, view.Table, true)
+	a.activeView = view
 
-	// Start polling in a background goroutine so we never block the UI loop.
 	go func() {
 		if err := view.model.Watch(a.ctx); err != nil {
 			log.Error().Err(err).Msg("cloud run initial load failed")

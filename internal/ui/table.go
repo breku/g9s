@@ -1,15 +1,21 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
 // ResourceTable is a reusable tview.Table wrapper that renders dao.TableData.
-// It is embedded by resource-specific view structs (e.g. CloudRunView).
+// It stores the last-received data so it can re-render when the filter changes
+// without waiting for the next model poll.
 type ResourceTable struct {
 	*tview.Table
+
+	lastData *dao.TableData
+	filter   string
 }
 
 // NewResourceTable creates a ResourceTable with standard styling.
@@ -20,21 +26,37 @@ func NewResourceTable() *ResourceTable {
 		SetFixed(1, 0)              // freeze header row
 
 	t.SetBackgroundColor(tcell.ColorDefault)
+	t.SetBorder(true)
+	t.SetBorderColor(tcell.ColorBlue)
 
 	return &ResourceTable{Table: t}
 }
 
-// Render populates the table from a dao.TableData snapshot.
-// It must be called from within app.QueueUpdateDraw when invoked from a goroutine.
+// Render stores data and repaints the table, applying any active filter.
+// Must be called on the tview main goroutine.
 func (r *ResourceTable) Render(data *dao.TableData) {
+	r.lastData = data
+	r.repaint()
+}
+
+// SetFilter updates the active filter string and repaints immediately.
+// An empty string clears the filter and shows all rows.
+// Must be called on the tview main goroutine.
+func (r *ResourceTable) SetFilter(f string) {
+	r.filter = f
+	r.repaint()
+}
+
+// repaint redraws the table from lastData, applying the current filter.
+func (r *ResourceTable) repaint() {
 	r.Clear()
 
-	if data == nil {
+	if r.lastData == nil {
 		return
 	}
 
-	// Header row
-	for col, h := range data.Header {
+	// Header row — always visible.
+	for col, h := range r.lastData.Header {
 		cell := tview.NewTableCell(" " + h + " ").
 			SetTextColor(tcell.ColorYellow).
 			SetSelectable(false).
@@ -42,20 +64,36 @@ func (r *ResourceTable) Render(data *dao.TableData) {
 		r.SetCell(0, col, cell)
 	}
 
-	// Data rows
-	for rowIdx, row := range data.Rows {
+	needle := strings.ToLower(r.filter)
+	rowIdx := 1
+	for _, row := range r.lastData.Rows {
+		// Filter: skip rows where no column contains the needle.
+		if needle != "" && !rowMatchesFilter(row, needle) {
+			continue
+		}
+
 		for col, val := range row.Columns {
 			color := tcell.ColorWhite
-			// Highlight status column (index 2 by convention) with colour.
 			if col == 2 {
 				color = statusColor(val)
 			}
 			cell := tview.NewTableCell(" " + val + " ").
 				SetTextColor(color).
 				SetExpansion(1)
-			r.SetCell(rowIdx+1, col, cell)
+			r.SetCell(rowIdx, col, cell)
+		}
+		rowIdx++
+	}
+}
+
+// rowMatchesFilter returns true if any column value contains needle (case-insensitive).
+func rowMatchesFilter(row dao.Row, needle string) bool {
+	for _, val := range row.Columns {
+		if strings.Contains(strings.ToLower(val), needle) {
+			return true
 		}
 	}
+	return false
 }
 
 // statusColor maps a status string to a tcell colour for quick visual scanning.

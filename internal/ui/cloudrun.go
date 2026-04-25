@@ -8,6 +8,11 @@ import (
 	"github.com/rivo/tview"
 )
 
+// Filterable is implemented by resource views that support row filtering.
+type Filterable interface {
+	SetFilter(string)
+}
+
 // CloudRunView is the tview page for Cloud Run services.
 // It embeds ResourceTable (the generic tview widget) and implements
 // model.TableListener so it receives model push notifications.
@@ -18,8 +23,11 @@ type CloudRunView struct {
 	model *model.Table
 }
 
-// Ensure CloudRunView satisfies model.TableListener at compile time.
-var _ model.TableListener = (*CloudRunView)(nil)
+// Ensure interfaces are satisfied at compile time.
+var (
+	_ model.TableListener = (*CloudRunView)(nil)
+	_ Filterable          = (*CloudRunView)(nil)
+)
 
 // NewCloudRunView creates a CloudRunView for the given project.
 func NewCloudRunView(a *App, project string) *CloudRunView {
@@ -30,6 +38,12 @@ func NewCloudRunView(a *App, project string) *CloudRunView {
 	}
 	v.model.AddListener(v)
 	return v
+}
+
+// SetFilter implements Filterable. Delegates to ResourceTable.
+// Must be called on the tview main goroutine.
+func (v *CloudRunView) SetFilter(f string) {
+	v.ResourceTable.SetFilter(f)
 }
 
 // TableDataChanged implements model.TableListener.
