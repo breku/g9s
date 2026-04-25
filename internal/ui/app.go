@@ -160,10 +160,7 @@ func (a *App) handleCommand(text string) {
 		log.Warn().Str("cmd", text).Msg("unknown resource command")
 		return
 	}
-	switch meta.DAO.Resource() {
-	case "cloudrun":
-		a.showCloudRun()
-	}
+	a.showResource(meta.DAO.Resource())
 }
 
 // handleFilter is called on every keystroke in '/' mode.
@@ -174,35 +171,37 @@ func (a *App) handleFilter(text string) {
 	}
 }
 
-// showCloudRun navigates to the Cloud Run view, creating it on first call.
-// Called on the main goroutine — must not block.
-func (a *App) showCloudRun() {
-	const pageName = "cloudrun"
-
+// showResource navigates to the view for the given resource key, creating it
+// on first call. Called on the main goroutine — must not block.
+func (a *App) showResource(resource string) {
 	if a.cfg.Project == "" {
 		log.Warn().Msg("no project configured; set --project or G9S_PROJECT")
 		tv := tview.NewTextView().
 			SetText("\n  [red]No GCP project set.[white] Use --project flag or G9S_PROJECT env var.").
 			SetDynamicColors(true)
-		a.pages.AddAndSwitchToPage(pageName, tv, true)
+		a.pages.AddAndSwitchToPage(resource, tv, true)
 		a.activeView = nil
 		return
 	}
 
-	// If the page already exists just switch to it.
-	if a.pages.HasPage(pageName) {
-		a.pages.SwitchToPage(pageName)
+	if a.pages.HasPage(resource) {
+		a.pages.SwitchToPage(resource)
 		return
 	}
 
-	view := NewCloudRunView(a, a.cfg.Project)
-	view.renderLoading()
-	a.pages.AddAndSwitchToPage(pageName, view.Table, true)
+	view := newResourceView(a, resource, a.cfg.Project)
+	if view == nil {
+		log.Warn().Str("resource", resource).Msg("no view registered")
+		return
+	}
+
+	view.RenderLoading()
+	a.pages.AddAndSwitchToPage(resource, view.Primitive(), true)
 	a.activeView = view
 
 	go func() {
-		if err := view.model.Watch(a.ctx); err != nil {
-			log.Error().Err(err).Msg("cloud run initial load failed")
+		if err := view.Watch(a.ctx); err != nil {
+			log.Error().Err(err).Str("resource", resource).Msg("initial load failed")
 		}
 	}()
 }

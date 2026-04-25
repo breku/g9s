@@ -18,15 +18,20 @@ import (
 //   - The cost/quota weight of the List API call.
 //   - User expectation of how "live" the data should feel.
 var Registry = map[string]ResourceMeta{
-	"cloudrun": {DAO: new(dao.CloudRun), TTL: 60 * time.Second},
+	"cloudrun":   {DAO: new(dao.CloudRun), TTL: 60 * time.Second},
+	"cloudbuild": {DAO: new(dao.CloudBuild), TTL: 30 * time.Second},
 }
 
 // Aliases maps shorthand command names to canonical registry keys.
 // Keep entries sorted for deterministic autocomplete ordering.
 var Aliases = map[string]string{
-	"cloud-run": "cloudrun",
-	"cloudrun":  "cloudrun",
-	"run":       "cloudrun",
+	"cloud-run":   "cloudrun",
+	"cloudrun":    "cloudrun",
+	"run":         "cloudrun",
+	"cloud-build": "cloudbuild",
+	"cloudbuild":  "cloudbuild",
+	"build":       "cloudbuild",
+	"cb":          "cloudbuild",
 }
 
 // Lookup returns the ResourceMeta for the given resource key.

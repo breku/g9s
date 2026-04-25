@@ -9,8 +9,8 @@ import (
 	"github.com/rivo/tview"
 )
 
-// CloudRunView is the tview page for Cloud Run services.
-type CloudRunView struct {
+// CloudBuildView is the tview page for Cloud Build triggers.
+type CloudBuildView struct {
 	*ResourceTable
 
 	app *App
@@ -18,53 +18,53 @@ type CloudRunView struct {
 }
 
 // Ensure interface is satisfied at compile time.
-var _ ResourceView = (*CloudRunView)(nil)
+var _ ResourceView = (*CloudBuildView)(nil)
 
-// NewCloudRunView creates a CloudRunView for the given project.
-func NewCloudRunView(a *App, project string) *CloudRunView {
-	v := &CloudRunView{
-		ResourceTable: NewResourceTable("Cloud Run"),
+// NewCloudBuildView creates a CloudBuildView for the given project.
+func NewCloudBuildView(a *App, project string) *CloudBuildView {
+	v := &CloudBuildView{
+		ResourceTable: NewResourceTable("Cloud Build"),
 		app:           a,
-		mdl:           model.NewTable("cloudrun", project),
+		mdl:           model.NewTable("cloudbuild", project),
 	}
 	v.mdl.AddListener(v)
 	return v
 }
 
 // Primitive implements ResourceView.
-func (v *CloudRunView) Primitive() tview.Primitive { return v.Table }
+func (v *CloudBuildView) Primitive() tview.Primitive { return v.Table }
 
 // Watch implements ResourceView.
-func (v *CloudRunView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
+func (v *CloudBuildView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
 
 // RenderLoading implements ResourceView.
-func (v *CloudRunView) RenderLoading() {
+func (v *CloudBuildView) RenderLoading() {
 	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(" Loading Cloud Run services… ").
+	v.SetCell(0, 0, tview.NewTableCell(" Loading Cloud Build triggers… ").
 		SetSelectable(false))
 }
 
 // SetFilter implements Filterable.
-func (v *CloudRunView) SetFilter(f string) {
+func (v *CloudBuildView) SetFilter(f string) {
 	v.ResourceTable.SetFilter(f)
 }
 
 // TableDataChanged implements model.TableListener.
-func (v *CloudRunView) TableDataChanged(data *dao.TableData) {
+func (v *CloudBuildView) TableDataChanged(data *dao.TableData) {
 	v.app.tview.QueueUpdateDraw(func() {
 		v.Render(data)
 	})
 }
 
 // TableLoadFailed implements model.TableListener.
-func (v *CloudRunView) TableLoadFailed(err error) {
+func (v *CloudBuildView) TableLoadFailed(err error) {
 	v.app.tview.QueueUpdateDraw(func() {
 		v.renderError(err)
 	})
 }
 
 // renderError clears the table and shows the error message.
-func (v *CloudRunView) renderError(err error) {
+func (v *CloudBuildView) renderError(err error) {
 	v.Clear()
 	v.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
 		SetSelectable(false))
