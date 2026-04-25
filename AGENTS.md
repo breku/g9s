@@ -1,4 +1,4 @@
-# gcp-terminal-dashboard (gcptui)
+# g9s
 
 A terminal dashboard for Google Cloud Platform resources, inspired by k9s.
 
@@ -32,7 +32,7 @@ Makefile                 – build / run / test / lint / tidy / release-dry-run 
 ## Build & Run Commands
 
 ```bash
-make build          # produces bin/gcptui
+make build          # produces bin/g9s
 make run            # go run with version ldflags
 make test           # go test ./...
 make lint           # golangci-lint run ./...
@@ -47,7 +47,7 @@ make release-dry-run  # goreleaser snapshot
 - Log with `zerolog` at the call site — import `github.com/rs/zerolog/log` and use `log.Info().Str("k","v").Msg("…")`.
 - `tview` UI mutations **must** happen inside `app.QueueUpdateDraw(func(){…})` when called from goroutines.
 - Cobra sub-commands are registered in their own file under `cmd/` and added to `rootCmd` via `rootCmd.AddCommand(…)` inside an `init()` function.
-- Version string is injected at build time via `-ldflags "-X github.com/brekol/gcp-terminal-dashboard/cmd.Version=…"`.
+- Version string is injected at build time via `-ldflags "-X github.com/brekol/g9s/cmd.Version=…"`.
 
 ## Configuration
 

@@ -1,5 +1,5 @@
-BIN         := gcptui
-MODULE      := github.com/brekol/gcp-terminal-dashboard
+BIN         := g9s
+MODULE      := github.com/brekol/g9s
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS     := -s -w -X $(MODULE)/cmd.Version=$(VERSION)
 

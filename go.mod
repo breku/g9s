@@ -1,4 +1,4 @@
-module github.com/brekol/gcp-terminal-dashboard
+module github.com/brekol/g9s
 
 go 1.22
 

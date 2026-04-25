@@ -1,6 +1,6 @@
 package main
 
-import "github.com/brekol/gcp-terminal-dashboard/cmd"
+import "github.com/brekol/g9s/cmd"
 
 func main() {
 	cmd.Execute()

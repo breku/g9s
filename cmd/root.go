@@ -3,7 +3,7 @@ package cmd
 import (
 	"os"
 
-	"github.com/brekol/gcp-terminal-dashboard/internal/ui"
+	"github.com/brekol/g9s/internal/ui"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
