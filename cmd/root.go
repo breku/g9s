@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 
+	"github.com/brekol/g9s/internal/config"
 	"github.com/brekol/g9s/internal/ui"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -17,13 +18,17 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "gcptui",
+	Use:   "g9s",
 	Short: "A terminal dashboard for GCP resources",
-	Long: `gcptui is a terminal UI for browsing and managing Google Cloud Platform
+	Long: `g9s is a terminal UI for browsing and managing Google Cloud Platform
 resources. Similar to k9s but for GCP.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log.Debug().Msg("starting gcptui")
-		app := ui.New()
+		log.Debug().Msg("starting g9s")
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		app := ui.New(cfg)
 		return app.Run()
 	},
 }
@@ -38,7 +43,7 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig, initLogger)
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default $HOME/.config/gcptui/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default $HOME/.config/g9s/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level (trace|debug|info|warn|error)")
 	rootCmd.PersistentFlags().StringVarP(&project, "project", "p", "", "GCP project ID")
 
@@ -53,12 +58,12 @@ func initConfig() {
 		viper.SetConfigFile(cfgFile)
 	} else {
 		home, _ := os.UserHomeDir()
-		viper.AddConfigPath(home + "/.config/gcptui")
+		viper.AddConfigPath(home + "/.config/g9s")
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
 	}
 
-	viper.SetEnvPrefix("GCPTUI")
+	viper.SetEnvPrefix("G9S")
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err == nil {

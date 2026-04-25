@@ -3,7 +3,7 @@ package config
 
 import "github.com/spf13/viper"
 
-// Config holds the runtime configuration for gcptui.
+// Config holds the runtime configuration for g9s.
 type Config struct {
 	Project  string `mapstructure:"project"`
 	LogLevel string `mapstructure:"log_level"`
