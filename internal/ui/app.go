@@ -3,9 +3,9 @@ package ui
 
 import (
 	"context"
-	"strings"
 
 	"github.com/brekol/g9s/internal/config"
+	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
@@ -139,7 +139,7 @@ func (a *App) showCmdBar(mode cmdMode) {
 		a.root.AddItem(a.pages, 0, 1, false)
 		a.cmdbarShown = true
 	}
-	a.tview.SetFocus(a.cmdbar)
+	a.tview.SetFocus(a.cmdbar.InputField)
 }
 
 // hideCmdBar removes the command bar from the layout and returns focus to pages.
@@ -152,12 +152,17 @@ func (a *App) hideCmdBar() {
 }
 
 // handleCommand is called when the user submits a ':' command.
+// It resolves the input through the model alias table so routing and
+// autocomplete always stay in sync.
 func (a *App) handleCommand(text string) {
-	switch strings.TrimSpace(strings.ToLower(text)) {
-	case "run", "cloudrun", "cloud-run":
-		a.showCloudRun()
-	default:
+	meta, ok := model.Resolve(text)
+	if !ok {
 		log.Warn().Str("cmd", text).Msg("unknown resource command")
+		return
+	}
+	switch meta.DAO.Resource() {
+	case "cloudrun":
+		a.showCloudRun()
 	}
 }
 

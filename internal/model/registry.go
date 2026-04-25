@@ -1,6 +1,8 @@
 package model
 
 import (
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/brekol/g9s/internal/dao"
@@ -19,9 +21,41 @@ var Registry = map[string]ResourceMeta{
 	"cloudrun": {DAO: new(dao.CloudRun), TTL: 60 * time.Second},
 }
 
+// Aliases maps shorthand command names to canonical registry keys.
+// Keep entries sorted for deterministic autocomplete ordering.
+var Aliases = map[string]string{
+	"cloud-run": "cloudrun",
+	"cloudrun":  "cloudrun",
+	"run":       "cloudrun",
+}
+
 // Lookup returns the ResourceMeta for the given resource key.
 // The second return value is false if the resource is not registered.
 func Lookup(resource string) (ResourceMeta, bool) {
 	m, ok := Registry[resource]
 	return m, ok
+}
+
+// Resolve maps an alias or canonical key to a ResourceMeta.
+// Returns false if the input matches no known alias or registry key.
+func Resolve(input string) (ResourceMeta, bool) {
+	key, ok := Aliases[strings.ToLower(strings.TrimSpace(input))]
+	if !ok {
+		return ResourceMeta{}, false
+	}
+	return Lookup(key)
+}
+
+// CompleteCommand returns all alias names that have the given prefix,
+// sorted alphabetically. Used to populate the cmdbar autocomplete list.
+func CompleteCommand(prefix string) []string {
+	prefix = strings.ToLower(prefix)
+	var matches []string
+	for alias := range Aliases {
+		if strings.HasPrefix(alias, prefix) {
+			matches = append(matches, alias)
+		}
+	}
+	sort.Strings(matches)
+	return matches
 }

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -13,18 +14,19 @@ const (
 	modeFilter                 // '/' — filter rows in the active view
 )
 
-// CmdBar is the single-line input bar shown at the top of the layout.
-// It is hidden (zero height) when inactive and shown when the user presses
-// ':' (command mode) or '/' (filter mode).
+// CmdBar is a bordered InputField that exposes ':' command and '/' filter
+// modes. In command mode it uses tview's native dropdown autocomplete to
+// suggest resource aliases.
 //
 // Callers register callbacks:
 //   - OnCommand(text) — fired when the user submits a ':' command (Enter).
 //   - OnFilter(text)  — fired on every keystroke in '/' mode.
-//   - OnDismiss()     — fired when Escape is pressed.
+//   - OnDismiss()     — fired when Escape is pressed or after a command runs.
 type CmdBar struct {
 	*tview.InputField
 
-	mode      cmdMode
+	mode cmdMode
+
 	onCommand func(string)
 	onFilter  func(string)
 	onDismiss func()
@@ -38,9 +40,35 @@ func NewCmdBar() *CmdBar {
 	f.SetFieldBackgroundColor(tcell.ColorDefault)
 	f.SetBackgroundColor(tcell.ColorDefault)
 	f.SetFieldTextColor(tcell.ColorWhite)
-	f.SetLabelColor(tcell.ColorYellow)
+
+	// Native dropdown autocomplete styling.
+	f.SetAutocompleteStyles(
+		tcell.ColorDarkBlue,
+		tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorDarkBlue),
+		tcell.StyleDefault.Foreground(tcell.ColorYellow).Background(tcell.ColorDarkBlue),
+	)
 
 	cb := &CmdBar{InputField: f}
+
+	f.SetAutocompleteFunc(func(currentText string) []string {
+		if cb.mode != modeCommand || currentText == "" {
+			return nil
+		}
+		return model.CompleteCommand(currentText)
+	})
+
+	f.SetAutocompletedFunc(func(text string, index, source int) bool {
+		if cb.mode != modeCommand {
+			return false
+		}
+		// Accept on Tab / Enter / click; ignore the on-typing source so the
+		// dropdown stays open while the user keeps typing.
+		if source == tview.AutocompletedNavigate {
+			return false
+		}
+		f.SetText(text)
+		return true
+	})
 
 	f.SetChangedFunc(func(text string) {
 		if cb.mode == modeFilter && cb.onFilter != nil {
@@ -58,7 +86,6 @@ func NewCmdBar() *CmdBar {
 				cb.onDismiss()
 			}
 		case tcell.KeyEscape:
-			// Clear filter when escaping filter mode.
 			if cb.mode == modeFilter && cb.onFilter != nil {
 				cb.onFilter("")
 			}
@@ -71,17 +98,17 @@ func NewCmdBar() *CmdBar {
 	return cb
 }
 
-// ActivateCommand switches the bar to command mode (':') and focuses it.
+// ActivateCommand switches the bar to command mode (':') and clears state.
 func (cb *CmdBar) ActivateCommand() {
 	cb.mode = modeCommand
-	cb.SetLabel(" :")
+	cb.SetLabel(" : ")
 	cb.SetText("")
 }
 
-// ActivateFilter switches the bar to filter mode ('/') and focuses it.
+// ActivateFilter switches the bar to filter mode ('/') and clears state.
 func (cb *CmdBar) ActivateFilter() {
 	cb.mode = modeFilter
-	cb.SetLabel(" /")
+	cb.SetLabel(" / ")
 	cb.SetText("")
 }
 
