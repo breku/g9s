@@ -35,6 +35,8 @@ func newResourceView(a *App, resource, project string) ResourceView {
 		return NewCloudRunView(a, project)
 	case "cloudbuild":
 		return NewCloudBuildView(a, project)
+	case "buildhistory":
+		return NewBuildHistoryView(a, project)
 	default:
 		return nil
 	}

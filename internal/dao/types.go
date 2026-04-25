@@ -18,8 +18,9 @@ type Row struct {
 
 // TableData is the full data set produced by a DAO: column headers + rows.
 type TableData struct {
-	Header []string
-	Rows   []Row
+	Header        []string
+	Rows          []Row
+	NextPageToken string // non-empty when more pages are available
 }
 
 // Accessor is the single required interface every DAO must satisfy.
@@ -41,4 +42,13 @@ type Accessor interface {
 // human-readable detail/describe output for a single resource instance.
 type Describer interface {
 	Describe(ctx context.Context, project, resourceID string) (string, error)
+}
+
+// Paginator is an optional interface for DAOs that support cursor-based
+// pagination. List() on such a DAO returns only the first page; callers
+// use NextPage to fetch subsequent pages using the token from TableData.
+type Paginator interface {
+	// NextPage fetches the next page of results using the given page token.
+	// pageSize is the maximum number of rows to return.
+	NextPage(ctx context.Context, project, pageToken string, pageSize int) (*TableData, error)
 }

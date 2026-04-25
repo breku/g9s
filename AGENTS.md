@@ -28,6 +28,7 @@ internal/
     types.go                 – Accessor interface + optional capability interfaces (Describer, …)
     cloudrun.go              – Cloud Run v2 DAO (implements Accessor)
     cloudbuild.go            – Cloud Build triggers DAO (implements Accessor)
+    buildhistory.go          – Cloud Build history DAO (implements Accessor)
   gcp/client.go              – ADC credential helper, shared option.ClientOption slice
   model/
     types.go                 – TableListener observer interface + ResourceMeta struct
@@ -40,6 +41,7 @@ internal/
     cmdbar.go                – CmdBar: ':' command / '/' filter input with native dropdown autocomplete
     cloudrun.go              – CloudRunView: implements ResourceView
     cloudbuild.go            – CloudBuildView: implements ResourceView
+    buildhistory.go          – BuildHistoryView: implements ResourceView
 .goreleaser.yaml             – multi-platform builds + Homebrew tap formula
 Makefile                     – build / run / test / lint / tidy / release-dry-run targets
 ```
@@ -79,10 +81,11 @@ Key press
 
 TTLs are set per resource type in `model/registry.go`:
 
-| Resource     | TTL  | Rationale                                              |
-|--------------|------|--------------------------------------------------------|
-| `cloudrun`   | 60 s | Services are long-lived; List calls are quota-weighted |
-| `cloudbuild` | 30 s | Triggers change more often; API calls are lightweight  |
+| Resource       | TTL  | Rationale                                              |
+|----------------|------|--------------------------------------------------------|
+| `cloudrun`     | 60 s | Services are long-lived; List calls are quota-weighted |
+| `cloudbuild`   | 30 s | Triggers change more often; API calls are lightweight  |
+| `buildhistory` | 15 s | Builds are transient; users expect near-real-time view |
 
 When adding a new resource, choose a TTL based on change frequency, API quota cost, and user expectation of data freshness.
 
