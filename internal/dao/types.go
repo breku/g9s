@@ -10,10 +10,14 @@ import (
 
 // Row represents a single resource row returned by a DAO.
 // Columns must match the headers returned by the same DAO's Header() method.
+// Meta carries DAO-specific metadata that the view layer may use for actions
+// (e.g. log bucket, status) without exposing them as visible columns.
 type Row struct {
 	// ID is the fully-qualified resource name, used to identify the row.
 	ID      string
 	Columns []string
+	// Meta holds arbitrary key-value metadata set by the DAO.
+	Meta map[string]string
 }
 
 // TableData is the full data set produced by a DAO: column headers + rows.

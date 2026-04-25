@@ -4,12 +4,21 @@ import (
 	"context"
 
 	"github.com/brekol/g9s/internal/model"
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
 // Filterable is implemented by resource views that support row filtering.
 type Filterable interface {
 	SetFilter(string)
+}
+
+// KeyHandler is an optional interface for resource views that handle their
+// own key bindings (e.g. 'l' for logs in BuildHistoryView).
+// HandleKey returns true if the event was consumed, false to let the app
+// handle it.
+type KeyHandler interface {
+	HandleKey(event *tcell.EventKey) bool
 }
 
 // ResourceView is the common interface for all resource views. It unifies

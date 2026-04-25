@@ -27,8 +27,11 @@ type BuildHistoryView struct {
 	loading       bool // true while a background page fetch is in flight
 }
 
-// Ensure interface is satisfied at compile time.
-var _ ResourceView = (*BuildHistoryView)(nil)
+// Ensure interfaces are satisfied at compile time.
+var (
+	_ ResourceView = (*BuildHistoryView)(nil)
+	_ KeyHandler   = (*BuildHistoryView)(nil)
+)
 
 // NewBuildHistoryView creates a BuildHistoryView for the given project.
 func NewBuildHistoryView(a *App, project string) *BuildHistoryView {
@@ -68,6 +71,71 @@ func (v *BuildHistoryView) RenderLoading() {
 // SetFilter implements Filterable.
 func (v *BuildHistoryView) SetFilter(f string) {
 	v.ResourceTable.SetFilter(f)
+}
+
+// HandleKey implements KeyHandler.
+// 'l' opens the log viewer for the selected build.
+func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
+	if event.Rune() != 'l' {
+		return false
+	}
+	row := v.SelectedRow()
+	if row == nil {
+		return true
+	}
+	buildID := row.Meta["buildId"]
+	bucket := row.Meta["logsBucket"]
+	status := row.Meta["status"]
+	project := row.Meta["project"]
+	loggingMode := row.Meta["loggingMode"]
+	createTime := row.Meta["createTime"]
+	if buildID == "" {
+		return true
+	}
+
+	// CLOUD_LOGGING_ONLY: bucket is always empty; go straight to Cloud Logging path.
+	if loggingMode == "CLOUD_LOGGING_ONLY" {
+		v.openLogs(buildID, "", status, project, loggingMode, createTime)
+		return true
+	}
+
+	if bucket != "" {
+		v.openLogs(buildID, bucket, status, project, loggingMode, createTime)
+		return true
+	}
+
+	// Bucket not populated yet — call GetBuild to resolve it.
+	go func() {
+		b, err := dao.GetBuild(v.app.ctx, project, buildID)
+		if err != nil {
+			log.Error().Err(err).Str("buildId", buildID).Msg("build history: GetBuild failed")
+			return
+		}
+		resolvedMode := b.Options.GetLogging().String()
+		resolvedBucket := dao.LogsBucketForBuild(b)
+		resolvedCreate := createTime
+		if b.CreateTime != nil {
+			resolvedCreate = b.CreateTime.AsTime().UTC().Format("2006-01-02T15:04:05Z")
+		}
+		if resolvedMode != "CLOUD_LOGGING_ONLY" && resolvedBucket == "" {
+			log.Warn().Str("buildId", buildID).Msg("build history: cannot determine log bucket")
+			return
+		}
+		v.app.tview.QueueUpdateDraw(func() {
+			v.openLogs(buildID, resolvedBucket, status, project, resolvedMode, resolvedCreate)
+		})
+	}()
+	return true
+}
+
+// openLogs mounts a LogView overlay and starts fetching/streaming.
+// Must be called on the tview main goroutine.
+func (v *BuildHistoryView) openLogs(buildID, bucket, status, project, loggingMode, createTime string) {
+	lv := NewLogView(v.app, buildID, bucket, status, project, loggingMode, createTime)
+	v.app.tview.EnableMouse(false) // allow terminal-native mouse selection in log view
+	v.app.pages.AddPage("logview", lv.TextView, true, true)
+	v.app.tview.SetFocus(lv.TextView)
+	go lv.Start(v.app.ctx)
 }
 
 // TableDataChanged implements model.TableListener.

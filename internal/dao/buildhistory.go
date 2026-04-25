@@ -14,6 +14,47 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+// GetBuild fetches a single build by project and build ID.
+// Returns the build proto with the most up-to-date fields, including
+// LogsBucket which may be empty on very early-stage builds.
+func GetBuild(ctx context.Context, project, buildID string) (*cloudbuildpb.Build, error) {
+	opts, err := gcp.ClientOptions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("buildhistory: credentials: %w", err)
+	}
+	client, err := cloudbuild.NewClient(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("buildhistory: new client: %w", err)
+	}
+	defer client.Close()
+
+	return client.GetBuild(ctx, &cloudbuildpb.GetBuildRequest{
+		ProjectId: project,
+		Id:        buildID,
+	})
+}
+
+// LogsBucketForBuild returns the GCS bucket name (without gs:// prefix) for
+// a build's logs. It uses the build's LogsBucket field when set, and falls
+// back to deriving the default bucket from the LogUrl (which encodes the
+// project number) for builds that are still starting up.
+func LogsBucketForBuild(b *cloudbuildpb.Build) string {
+	if b.LogsBucket != "" {
+		return strings.TrimPrefix(b.LogsBucket, "gs://")
+	}
+	// LogUrl format: https://console.cloud.google.com/cloud-build/builds/<id>?project=<projectNumber>
+	// Default bucket: <projectNumber>.cloudbuild-logs.googleusercontent.com
+	if b.LogUrl != "" {
+		if idx := strings.Index(b.LogUrl, "?project="); idx != -1 {
+			projectNumber := b.LogUrl[idx+len("?project="):]
+			if projectNumber != "" {
+				return projectNumber + ".cloudbuild-logs.googleusercontent.com"
+			}
+		}
+	}
+	return ""
+}
+
 // Ensure BuildHistory satisfies Accessor and Paginator at compile time.
 var (
 	_ Accessor  = (*BuildHistory)(nil)
@@ -119,9 +160,28 @@ func rowFromBuild(b *cloudbuildpb.Build) Row {
 	branch := buildBranch(b)
 	images := buildImages(b)
 
+	loggingMode := "LEGACY"
+	if b.Options != nil {
+		loggingMode = b.Options.GetLogging().String()
+	}
+
+	createTime := ""
+	if b.CreateTime != nil {
+		createTime = b.CreateTime.AsTime().UTC().Format(time.RFC3339)
+	}
+
 	return Row{
 		ID:      b.Name,
 		Columns: []string{id, trigger, status, started, duration, branch, images},
+		Meta: map[string]string{
+			"buildId":     b.Id,
+			"logsBucket":  strings.TrimPrefix(b.LogsBucket, "gs://"),
+			"logUrl":      b.LogUrl,
+			"status":      status,
+			"project":     b.ProjectId,
+			"loggingMode": loggingMode,
+			"createTime":  createTime,
+		},
 	}
 }
 

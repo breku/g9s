@@ -22,9 +22,13 @@ type App struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	// activeView is the currently displayed resource view, if it implements
-	// Filterable. Used to forward filter keystrokes.
-	activeView Filterable
+	// activeView is the currently displayed resource view.
+	// Used to forward filter keystrokes and optional key bindings.
+	activeView ResourceView
+
+	// viewCache stores ResourceView instances by resource key so that
+	// navigating back to an already-mounted page restores the correct view.
+	viewCache map[string]ResourceView
 }
 
 // New creates and initialises a new App.
@@ -36,12 +40,13 @@ func New(cfg *config.Config) *App {
 	cmdbar := NewCmdBar()
 
 	a := &App{
-		tview:  tv,
-		pages:  pages,
-		cmdbar: cmdbar,
-		cfg:    cfg,
-		ctx:    ctx,
-		cancel: cancel,
+		tview:     tv,
+		pages:     pages,
+		cmdbar:    cmdbar,
+		cfg:       cfg,
+		ctx:       ctx,
+		cancel:    cancel,
+		viewCache: make(map[string]ResourceView),
 	}
 
 	// Wire cmdbar callbacks — all called on the main goroutine by tview.
@@ -106,6 +111,14 @@ func New(cfg *config.Config) *App {
 			a.stop()
 			return nil
 		}
+		// Forward to the active view's KeyHandler if it implements one.
+		if a.activeView != nil {
+			if kh, ok := a.activeView.(KeyHandler); ok {
+				if kh.HandleKey(event) {
+					return nil
+				}
+			}
+		}
 		return event
 	})
 
@@ -168,7 +181,7 @@ func (a *App) handleCommand(text string) {
 }
 
 // handleFilter is called on every keystroke in '/' mode.
-// It forwards the filter string to the active view if it supports filtering.
+// It forwards the filter string to the active view if one is set.
 func (a *App) handleFilter(text string) {
 	if a.activeView != nil {
 		a.activeView.SetFilter(text)
@@ -190,6 +203,7 @@ func (a *App) showResource(resource string) {
 
 	if a.pages.HasPage(resource) {
 		a.pages.SwitchToPage(resource)
+		a.activeView = a.viewCache[resource]
 		return
 	}
 
@@ -198,6 +212,8 @@ func (a *App) showResource(resource string) {
 		log.Warn().Str("resource", resource).Msg("no view registered")
 		return
 	}
+
+	a.viewCache[resource] = view
 
 	view.RenderLoading()
 	a.pages.AddAndSwitchToPage(resource, view.Primitive(), true)

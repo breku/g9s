@@ -18,6 +18,10 @@ type ResourceTable struct {
 	title    string // resource label shown in the border, e.g. "Cloud Run"
 	lastData *dao.TableData
 	filter   string
+
+	// rowIndex maps tview row index (1-based, header=0) → dao.Row.
+	// Rebuilt on every repaint. Enables SelectedRow().
+	rowIndex []dao.Row
 }
 
 // NewResourceTable creates a ResourceTable with standard styling.
@@ -51,9 +55,22 @@ func (r *ResourceTable) SetFilter(f string) {
 	r.repaint()
 }
 
+// SelectedRow returns the dao.Row for the currently selected table row.
+// Returns nil if nothing is selected or the table is empty.
+func (r *ResourceTable) SelectedRow() *dao.Row {
+	row, _ := r.Table.GetSelection()
+	// row 0 is the header; data rows start at 1.
+	idx := row - 1
+	if idx < 0 || idx >= len(r.rowIndex) {
+		return nil
+	}
+	return &r.rowIndex[idx]
+}
+
 // repaint redraws the table from lastData, applying the current filter.
 func (r *ResourceTable) repaint() {
 	r.Clear()
+	r.rowIndex = r.rowIndex[:0]
 
 	if r.lastData == nil {
 		r.SetTitle(" " + r.title + " ")
@@ -87,6 +104,7 @@ func (r *ResourceTable) repaint() {
 				SetExpansion(1)
 			r.SetCell(rowIdx, col, cell)
 		}
+		r.rowIndex = append(r.rowIndex, row)
 		rowIdx++
 	}
 
@@ -107,12 +125,14 @@ func rowMatchesFilter(row dao.Row, needle string) bool {
 // statusColor maps a status string to a tcell colour for quick visual scanning.
 func statusColor(status string) tcell.Color {
 	switch status {
-	case "Ready":
+	case "Ready", "Success":
 		return tcell.ColorGreen
-	case "Failed":
+	case "Failed", "Failure", "Internal Error", "Expired":
 		return tcell.ColorRed
-	case "Deploying":
+	case "Deploying", "Working", "Queued", "Pending":
 		return tcell.ColorYellow
+	case "Cancelled", "Timeout":
+		return tcell.ColorOrange
 	default:
 		return tcell.ColorGray
 	}
