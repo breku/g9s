@@ -155,6 +155,10 @@ func (a *App) hideCmdBar() {
 // It resolves the input through the model alias table so routing and
 // autocomplete always stay in sync.
 func (a *App) handleCommand(text string) {
+	if text == "q" || text == "quit" {
+		a.stop()
+		return
+	}
 	meta, ok := model.Resolve(text)
 	if !ok {
 		log.Warn().Str("cmd", text).Msg("unknown resource command")

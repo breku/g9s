@@ -32,6 +32,8 @@ var Aliases = map[string]string{
 	"cloudbuild":  "cloudbuild",
 	"build":       "cloudbuild",
 	"cb":          "cloudbuild",
+	"q":           "_quit",
+	"quit":        "_quit",
 }
 
 // Lookup returns the ResourceMeta for the given resource key.
