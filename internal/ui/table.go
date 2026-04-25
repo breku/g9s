@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/brekol/g9s/internal/dao"
@@ -14,12 +15,13 @@ import (
 type ResourceTable struct {
 	*tview.Table
 
+	title    string // resource label shown in the border, e.g. "Cloud Run"
 	lastData *dao.TableData
 	filter   string
 }
 
 // NewResourceTable creates a ResourceTable with standard styling.
-func NewResourceTable() *ResourceTable {
+func NewResourceTable(title string) *ResourceTable {
 	t := tview.NewTable().
 		SetBorders(false).
 		SetSelectable(true, false). // row-selection mode
@@ -28,8 +30,10 @@ func NewResourceTable() *ResourceTable {
 	t.SetBackgroundColor(tcell.ColorDefault)
 	t.SetBorder(true)
 	t.SetBorderColor(tcell.ColorBlue)
+	t.SetTitleColor(tcell.ColorWhite)
+	t.SetTitleAlign(tview.AlignCenter)
 
-	return &ResourceTable{Table: t}
+	return &ResourceTable{Table: t, title: title}
 }
 
 // Render stores data and repaints the table, applying any active filter.
@@ -52,6 +56,7 @@ func (r *ResourceTable) repaint() {
 	r.Clear()
 
 	if r.lastData == nil {
+		r.SetTitle(" " + r.title + " ")
 		return
 	}
 
@@ -84,6 +89,9 @@ func (r *ResourceTable) repaint() {
 		}
 		rowIdx++
 	}
+
+	// rowIdx-1 is the number of visible data rows (excluding header).
+	r.SetTitle(fmt.Sprintf(" %s [%d] ", r.title, rowIdx-1))
 }
 
 // rowMatchesFilter returns true if any column value contains needle (case-insensitive).

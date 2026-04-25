@@ -32,7 +32,7 @@ var (
 // NewCloudRunView creates a CloudRunView for the given project.
 func NewCloudRunView(a *App, project string) *CloudRunView {
 	v := &CloudRunView{
-		ResourceTable: NewResourceTable(),
+		ResourceTable: NewResourceTable("Cloud Run"),
 		app:           a,
 		model:         model.NewTable("cloudrun", project),
 	}
