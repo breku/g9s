@@ -27,6 +27,9 @@ var streamingStatuses = map[string]bool{
 	"Pending": true,
 }
 
+// Ensure LogView satisfies Overlay at compile time.
+var _ Overlay = (*LogView)(nil)
+
 // LogView is a full-screen overlay that displays a Cloud Build log.
 // For GCS-backed builds it reads log-<id>.txt; for CLOUD_LOGGING_ONLY builds
 // it reads from the Cloud Logging API. For running builds it polls every 2s.
@@ -45,8 +48,8 @@ type LogView struct {
 	createTime  string // RFC3339, used as timestamp lower bound for log filter
 
 	streaming bool
-
-	cancel context.CancelFunc
+	onClose   func()
+	cancel    context.CancelFunc
 }
 
 // NewLogView creates a LogView for the given build.
@@ -88,8 +91,20 @@ func NewLogView(a *App, buildID, bucket, status, project, loggingMode, createTim
 	return lv
 }
 
-// Start fetches the log and begins streaming if the build is running.
-// Must be called from a goroutine — blocks until closed or build finishes.
+// Primitive implements Overlay.
+func (lv *LogView) Primitive() tview.Primitive { return lv.TextView }
+
+// RenderLoading implements Overlay. Shows a placeholder before the first fetch completes.
+func (lv *LogView) RenderLoading() {
+	lv.TextView.SetText(fmt.Sprintf(" Loading logs for build %s…", lv.buildID))
+}
+
+// OnClose implements Overlay. Called by App.PushOverlay to register the
+// dismiss callback.
+func (lv *LogView) OnClose(fn func()) { lv.onClose = fn }
+
+// Start implements Overlay. Fetches the log and streams if the build is running.
+// Blocks until closed or ctx is cancelled.
 func (lv *LogView) Start(parentCtx context.Context) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	lv.cancel = cancel
@@ -112,7 +127,6 @@ func (lv *LogView) Start(parentCtx context.Context) {
 		return
 	}
 
-	// Poll every 2 seconds, tracking byte offset to append only new data.
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -132,9 +146,19 @@ func (lv *LogView) Start(parentCtx context.Context) {
 	}
 }
 
-// streamCloudLogging fetches all log entries from Cloud Logging for this build.
-// For running builds it polls every 2s, tracking the last seen insertId to
-// append only new entries.
+// close cancels background work and calls the registered onClose callback
+// so App.PopOverlay cleans up pages/mouse/focus.
+func (lv *LogView) close() {
+	if lv.cancel != nil {
+		lv.cancel()
+	}
+	if lv.onClose != nil {
+		lv.onClose()
+	}
+}
+
+// streamCloudLogging fetches log entries from the Cloud Logging API.
+// For running builds it polls every 2s, appending only new entries.
 func (lv *LogView) streamCloudLogging(ctx context.Context, opts []option.ClientOption) {
 	client, err := logging.NewClient(ctx, opts...)
 	if err != nil {
@@ -143,7 +167,6 @@ func (lv *LogView) streamCloudLogging(ctx context.Context, opts []option.ClientO
 	}
 	defer client.Close()
 
-	// Anchor the query at the build's create time (fall back to 24h ago).
 	since := lv.createTime
 	if since == "" {
 		since = time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
@@ -166,7 +189,7 @@ func (lv *LogView) streamCloudLogging(ctx context.Context, opts []option.ClientO
 		})
 
 		var newLines []string
-		found := (lastInsertID == "") // if no anchor yet, collect everything
+		found := (lastInsertID == "")
 		for {
 			entry, err := it.Next()
 			if err == iterator.Done {
@@ -297,7 +320,6 @@ func (lv *LogView) fetchFrom(ctx context.Context, opts []option.ClientOption, by
 	obj := client.Bucket(lv.bucket).Object(lv.object)
 	rc, err := obj.NewRangeReader(ctx, byteOffset, -1)
 	if err != nil {
-		// Object may not exist yet (build just started) — not an error.
 		return byteOffset
 	}
 	defer rc.Close()
@@ -324,16 +346,6 @@ func (lv *LogView) appendError(err error) {
 	})
 }
 
-// close stops streaming and removes the overlay from the pages stack.
-func (lv *LogView) close() {
-	if lv.cancel != nil {
-		lv.cancel()
-	}
-	lv.app.pages.RemovePage("logview")
-	lv.app.tview.SetFocus(lv.app.pages)
-	lv.app.tview.EnableMouse(true)
-}
-
 // stripAnsi removes ANSI escape sequences from s so tview doesn't render
 // them as literal bytes. Cloud Build logs frequently contain colour codes.
 func stripAnsi(s string) string {
@@ -342,12 +354,11 @@ func stripAnsi(s string) string {
 	i := 0
 	for i < len(s) {
 		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
-			// Skip until the end of the escape sequence (letter a-z / A-Z).
 			i += 2
 			for i < len(s) && !isAnsiEnd(s[i]) {
 				i++
 			}
-			i++ // skip the terminating letter
+			i++
 			continue
 		}
 		b.WriteByte(s[i])

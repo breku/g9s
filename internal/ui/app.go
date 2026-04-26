@@ -188,6 +188,29 @@ func (a *App) handleFilter(text string) {
 	}
 }
 
+// PushOverlay mounts an Overlay on top of the current page. It disables mouse
+// (so the terminal can select text), starts the overlay's background work, and
+// wires OnClose to call PopOverlay. Safe to call on the tview main goroutine.
+func (a *App) PushOverlay(o Overlay) {
+	const overlayPage = "overlay"
+	o.OnClose(func() { a.PopOverlay() })
+	a.tview.EnableMouse(false)
+	a.pages.AddPage(overlayPage, o.Primitive(), true, true)
+	a.tview.SetFocus(o.Primitive())
+	o.RenderLoading()
+	go o.Start(a.ctx)
+}
+
+// PopOverlay removes the overlay page and restores mouse + focus.
+// Safe to call from any goroutine via QueueUpdateDraw, or directly on the
+// main goroutine.
+func (a *App) PopOverlay() {
+	const overlayPage = "overlay"
+	a.pages.RemovePage(overlayPage)
+	a.tview.SetFocus(a.pages)
+	a.tview.EnableMouse(true)
+}
+
 // showResource navigates to the view for the given resource key, creating it
 // on first call. Called on the main goroutine — must not block.
 func (a *App) showResource(resource string) {

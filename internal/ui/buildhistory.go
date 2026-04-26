@@ -128,14 +128,10 @@ func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
 	return true
 }
 
-// openLogs mounts a LogView overlay and starts fetching/streaming.
-// Must be called on the tview main goroutine.
+// openLogs pushes a LogView overlay via the app. Must be called on the tview main goroutine.
 func (v *BuildHistoryView) openLogs(buildID, bucket, status, project, loggingMode, createTime string) {
 	lv := NewLogView(v.app, buildID, bucket, status, project, loggingMode, createTime)
-	v.app.tview.EnableMouse(false) // allow terminal-native mouse selection in log view
-	v.app.pages.AddPage("logview", lv.TextView, true, true)
-	v.app.tview.SetFocus(lv.TextView)
-	go lv.Start(v.app.ctx)
+	v.app.PushOverlay(lv)
 }
 
 // TableDataChanged implements model.TableListener.

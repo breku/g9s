@@ -36,6 +36,25 @@ type ResourceView interface {
 	RenderLoading()
 }
 
+// Overlay is implemented by full-screen panels that sit on top of the current
+// resource view (e.g. log viewer, detail panels). App.PushOverlay /
+// App.PopOverlay manage their lifecycle so individual views don't need to
+// manipulate pages directly.
+type Overlay interface {
+	// Primitive returns the tview primitive to display.
+	Primitive() tview.Primitive
+	// RenderLoading shows a placeholder while the first fetch is in flight.
+	// Called by App.PushOverlay on the main goroutine before Start.
+	RenderLoading()
+	// Start begins any background work (fetching, streaming).
+	// Called in a new goroutine by App.PushOverlay; blocks until the overlay
+	// is closed or the context is cancelled.
+	Start(ctx context.Context)
+	// OnClose registers a callback that the overlay calls when it wants to
+	// dismiss itself (e.g. user presses Escape). App.PushOverlay sets this.
+	OnClose(func())
+}
+
 // newResourceView is a factory that creates the correct ResourceView for a
 // given registry key. Returns nil if the key is unknown.
 func newResourceView(a *App, resource, project string) ResourceView {

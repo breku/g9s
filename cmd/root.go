@@ -26,6 +26,7 @@ resources. Similar to k9s but for GCP.`,
 		log.Debug().Msg("starting g9s")
 		cfg, err := config.Load()
 		if err != nil {
+			log.Error().Err(err).Msg("failed to load config")
 			return err
 		}
 		app := ui.New(cfg)
