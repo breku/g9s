@@ -3,8 +3,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/brekol/g9s/internal/config"
 	"github.com/brekol/g9s/internal/model"
@@ -13,19 +11,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// globalHints are always shown in the middle column regardless of which view
-// is active.
-var globalHints = []Hint{
-	{Key: ":", Desc: "command"},
-	{Key: "/", Desc: "filter"},
-	{Key: "q", Desc: "quit"},
-}
-
 // App wraps tview.Application with g9s state.
 type App struct {
 	tview       *tview.Application
 	pages       *tview.Pages
 	root        *tview.Flex
+	header      *Header
 	cmdbar      *CmdBar
 	cmdbarShown bool
 	cfg         *config.Config
@@ -43,9 +34,6 @@ type App struct {
 	// viewCache stores ResourceView instances by resource key so that
 	// navigating back to an already-mounted page restores the correct view.
 	viewCache map[string]ResourceView
-
-	// viewHintsView is the third header column showing per-view key hints.
-	viewHintsView *tview.TextView
 }
 
 // New creates and initialises a new App.
@@ -55,49 +43,17 @@ func New(cfg *config.Config) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cmdbar := NewCmdBar()
-
-	// Column 1 — project info, top-aligned.
-	project := cfg.Project
-	if project == "" {
-		project = "[red](no project set)"
-	}
-	projectView := tview.NewTextView().
-		SetText(" [white]g9s[darkgray] │ [yellow]project:[white] " + project).
-		SetTextAlign(tview.AlignLeft).
-		SetDynamicColors(true)
-	projectView.SetBackgroundColor(tcell.ColorDefault)
-
-	// Column 2 — global hints, static, one per line.
-	var globalBuf strings.Builder
-	for _, h := range globalHints {
-		fmt.Fprintf(&globalBuf, " [yellow]<%s>[white] %s\n", h.Key, h.Desc)
-	}
-	globalHintsView := tview.NewTextView().
-		SetText(globalBuf.String()).
-		SetTextAlign(tview.AlignLeft).
-		SetDynamicColors(true)
-	globalHintsView.SetBackgroundColor(tcell.ColorDefault)
-
-	// Column 3 — per-view hints, dynamic, one per line.
-	viewHintsView := tview.NewTextView().
-		SetTextAlign(tview.AlignLeft).
-		SetDynamicColors(true)
-	viewHintsView.SetBackgroundColor(tcell.ColorDefault)
-
-	headerRow := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(projectView, 0, 2, false).
-		AddItem(globalHintsView, 20, 0, false).
-		AddItem(viewHintsView, 0, 2, false)
+	header := NewHeader(cfg.Project)
 
 	a := &App{
-		tview:         tv,
-		pages:         pages,
-		cmdbar:        cmdbar,
-		cfg:           cfg,
-		ctx:           ctx,
-		cancel:        cancel,
-		viewCache:     make(map[string]ResourceView),
-		viewHintsView: viewHintsView,
+		tview:     tv,
+		pages:     pages,
+		header:    header,
+		cmdbar:    cmdbar,
+		cfg:       cfg,
+		ctx:       ctx,
+		cancel:    cancel,
+		viewCache: make(map[string]ResourceView),
 	}
 
 	// Wire cmdbar callbacks — all called on the main goroutine by tview.
@@ -111,7 +67,7 @@ func New(cfg *config.Config) *App {
 	pages.AddPage("home", placeholder, true, true)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(headerRow, 3, 0, false).
+		AddItem(header, 3, 0, false).
 		AddItem(pages, 0, 1, true)
 
 	a.root = root
@@ -119,7 +75,7 @@ func New(cfg *config.Config) *App {
 	tv.SetRoot(root, true).EnableMouse(true)
 
 	// No active view yet — clear the view hints column.
-	a.updateHints(nil)
+	a.header.SetViewHints(nil)
 
 	tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		// Let the cmdbar consume all input when it is focused.
@@ -154,20 +110,6 @@ func New(cfg *config.Config) *App {
 	})
 
 	return a
-}
-
-// updateHints sets the per-view hints column. Pass nil to clear it.
-// Must be called on the tview main goroutine.
-func (a *App) updateHints(hp HintProvider) {
-	if hp == nil {
-		a.viewHintsView.SetText("")
-		return
-	}
-	var b strings.Builder
-	for _, h := range hp.Hints() {
-		fmt.Fprintf(&b, " [yellow]<%s>[white] %s\n", h.Key, h.Desc)
-	}
-	a.viewHintsView.SetText(b.String())
 }
 
 // Run starts the blocking event loop.
@@ -242,9 +184,9 @@ func (a *App) PushOverlay(o Overlay) {
 	a.tview.SetFocus(o.Primitive())
 	o.RenderLoading()
 	if hp, ok := o.(HintProvider); ok {
-		a.updateHints(hp)
+		a.header.SetViewHints(hp)
 	} else {
-		a.updateHints(nil)
+		a.header.SetViewHints(nil)
 	}
 	go o.Start(a.ctx)
 }
@@ -258,9 +200,9 @@ func (a *App) PopOverlay() {
 	a.tview.SetFocus(a.pages)
 	a.tview.EnableMouse(true)
 	if hp, ok := a.activeView.(HintProvider); ok {
-		a.updateHints(hp)
+		a.header.SetViewHints(hp)
 	} else {
-		a.updateHints(nil)
+		a.header.SetViewHints(nil)
 	}
 }
 
@@ -274,7 +216,7 @@ func (a *App) showResource(resource string) {
 			SetDynamicColors(true)
 		a.pages.AddAndSwitchToPage(resource, tv, true)
 		a.activeView = nil
-		a.updateHints(nil)
+		a.header.SetViewHints(nil)
 		return
 	}
 
@@ -282,9 +224,9 @@ func (a *App) showResource(resource string) {
 		a.pages.SwitchToPage(resource)
 		a.activeView = a.viewCache[resource]
 		if hp, ok := a.activeView.(HintProvider); ok {
-			a.updateHints(hp)
+			a.header.SetViewHints(hp)
 		} else {
-			a.updateHints(nil)
+			a.header.SetViewHints(nil)
 		}
 		return
 	}
@@ -301,9 +243,9 @@ func (a *App) showResource(resource string) {
 	view.RenderLoading()
 	a.pages.AddAndSwitchToPage(resource, view.Primitive(), true)
 	if hp, ok := view.(HintProvider); ok {
-		a.updateHints(hp)
+		a.header.SetViewHints(hp)
 	} else {
-		a.updateHints(nil)
+		a.header.SetViewHints(nil)
 	}
 
 	go func() {
