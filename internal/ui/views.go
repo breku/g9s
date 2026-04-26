@@ -8,6 +8,20 @@ import (
 	"github.com/rivo/tview"
 )
 
+// Hint is a single key binding description shown in the header hint bar.
+type Hint struct {
+	Key  string // e.g. "l", "PgDn", ":"
+	Desc string // e.g. "View logs", "Next page"
+}
+
+// HintProvider is an optional interface for resource views and overlays that
+// want to advertise their key bindings in the header hint bar.
+// Global hints (q, :, /) are always shown by the app; views return only their
+// own additions.
+type HintProvider interface {
+	Hints() []Hint
+}
+
 // Filterable is implemented by resource views that support row filtering.
 type Filterable interface {
 	SetFilter(string)

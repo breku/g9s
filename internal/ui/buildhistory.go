@@ -31,6 +31,7 @@ type BuildHistoryView struct {
 var (
 	_ ResourceView = (*BuildHistoryView)(nil)
 	_ KeyHandler   = (*BuildHistoryView)(nil)
+	_ HintProvider = (*BuildHistoryView)(nil)
 )
 
 // NewBuildHistoryView creates a BuildHistoryView for the given project.
@@ -71,6 +72,14 @@ func (v *BuildHistoryView) RenderLoading() {
 // SetFilter implements Filterable.
 func (v *BuildHistoryView) SetFilter(f string) {
 	v.ResourceTable.SetFilter(f)
+}
+
+// Hints implements HintProvider.
+func (v *BuildHistoryView) Hints() []Hint {
+	return []Hint{
+		{Key: "l", Desc: "View logs"},
+		{Key: "PgDn", Desc: "Next page"},
+	}
 }
 
 // HandleKey implements KeyHandler.

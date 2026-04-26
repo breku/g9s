@@ -27,8 +27,11 @@ var streamingStatuses = map[string]bool{
 	"Pending": true,
 }
 
-// Ensure LogView satisfies Overlay at compile time.
-var _ Overlay = (*LogView)(nil)
+// Ensure LogView satisfies Overlay and HintProvider at compile time.
+var (
+	_ Overlay      = (*LogView)(nil)
+	_ HintProvider = (*LogView)(nil)
+)
 
 // LogView is a full-screen overlay that displays a Cloud Build log.
 // For GCS-backed builds it reads log-<id>.txt; for CLOUD_LOGGING_ONLY builds
@@ -93,6 +96,13 @@ func NewLogView(a *App, buildID, bucket, status, project, loggingMode, createTim
 
 // Primitive implements Overlay.
 func (lv *LogView) Primitive() tview.Primitive { return lv.TextView }
+
+// Hints implements HintProvider.
+func (lv *LogView) Hints() []Hint {
+	return []Hint{
+		{Key: "q/Esc", Desc: "Close"},
+	}
+}
 
 // RenderLoading implements Overlay. Shows a placeholder before the first fetch completes.
 func (lv *LogView) RenderLoading() {
