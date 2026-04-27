@@ -106,7 +106,11 @@ func (r *ResourceTable) repaint() {
 	}
 
 	// rowIdx-1 is the number of visible data rows (excluding header).
-	r.SetTitle(fmt.Sprintf("[::b] %s [[turquoise]%d[-]] ", r.title, rowIdx-1))
+	titleFilter := ""
+	if r.filter != "" {
+		titleFilter = fmt.Sprintf(" [yellow]/%s[-]", r.filter)
+	}
+	r.SetTitle(fmt.Sprintf("[::b] %s [[turquoise]%d[-]]%s ", r.title, rowIdx-1, titleFilter))
 }
 
 // rowMatchesFilter returns true if any column value contains needle (case-insensitive).
