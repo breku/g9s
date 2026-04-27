@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/rs/zerolog/log"
 )
 
 // CloudRunView is the tview page for Cloud Run services.
@@ -63,6 +65,7 @@ func (v *CloudRunView) Hints() []Hint {
 		{Key: "d", Desc: "Describe"},
 		{Key: "y", Desc: "YAML"},
 		{Key: "l", Desc: "Logs"},
+		{Key: "c", Desc: "Copy URL"},
 	}
 }
 
@@ -75,8 +78,26 @@ func (v *CloudRunView) HandleKey(event *tcell.EventKey) bool {
 		return v.openDescribe(true)
 	case 'l':
 		return v.openLogs()
+	case 'c':
+		return v.copyURL()
 	}
 	return false
+}
+
+// copyURL copies the selected service's URL to the system clipboard.
+func (v *CloudRunView) copyURL() bool {
+	row := v.SelectedRow()
+	if row == nil {
+		return true
+	}
+	url := row.Meta["url"]
+	if url == "" {
+		return true
+	}
+	if err := clipboard.WriteAll(url); err != nil {
+		log.Error().Err(err).Str("url", url).Msg("cloudrun: copy URL failed")
+	}
+	return true
 }
 
 // openDescribe pushes a DescribeView overlay for the selected service.

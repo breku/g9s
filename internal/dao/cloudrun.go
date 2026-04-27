@@ -83,6 +83,9 @@ func rowFromService(svc *runpb.Service) Row {
 	return Row{
 		ID:   svc.Name,
 		Type: colType,
+		Meta: map[string]string{
+			"url": url,
+		},
 		Columns: []Column{
 			{Text: name},
 			{Text: region},
