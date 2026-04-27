@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,8 @@ import (
 	"cloud.google.com/go/run/apiv2/runpb"
 	"github.com/brekol/g9s/internal/gcp"
 	"google.golang.org/api/iterator"
+	"google.golang.org/protobuf/encoding/protojson"
+	"gopkg.in/yaml.v3"
 )
 
 // Ensure CloudRun satisfies Accessor at compile time.
@@ -116,4 +119,55 @@ func conditionState(c *runpb.Condition) string {
 	default:
 		return "Unknown"
 	}
+}
+
+// getService fetches a single Cloud Run service by fully-qualified name.
+func getService(ctx context.Context, name string) (*runpb.Service, error) {
+	opts, err := gcp.ClientOptions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("cloudrun: credentials: %w", err)
+	}
+	client, err := run.NewServicesClient(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("cloudrun: new client: %w", err)
+	}
+	defer client.Close()
+	return client.GetService(ctx, &runpb.GetServiceRequest{Name: name})
+}
+
+// DescribeText returns a human-readable JSON description of a Cloud Run service,
+// equivalent to: gcloud run services describe <name>
+func DescribeText(ctx context.Context, name string) (string, error) {
+	svc, err := getService(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	b, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(svc)
+	if err != nil {
+		return "", fmt.Errorf("cloudrun: marshal: %w", err)
+	}
+	return string(b), nil
+}
+
+// DescribeYAML returns a YAML description of a Cloud Run service,
+// equivalent to: gcloud run services describe <name> --format=yaml
+func DescribeYAML(ctx context.Context, name string) (string, error) {
+	svc, err := getService(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	// proto → compact JSON → map → YAML
+	jsonBytes, err := protojson.MarshalOptions{}.Marshal(svc)
+	if err != nil {
+		return "", fmt.Errorf("cloudrun: marshal json: %w", err)
+	}
+	var m interface{}
+	if err := json.Unmarshal(jsonBytes, &m); err != nil {
+		return "", fmt.Errorf("cloudrun: unmarshal json: %w", err)
+	}
+	yamlBytes, err := yaml.Marshal(m)
+	if err != nil {
+		return "", fmt.Errorf("cloudrun: marshal yaml: %w", err)
+	}
+	return string(yamlBytes), nil
 }
