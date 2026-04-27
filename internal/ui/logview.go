@@ -22,10 +22,11 @@ var streamingStatuses = map[string]bool{
 	"Pending": true,
 }
 
-// Ensure LogView satisfies Overlay and HintProvider at compile time.
+// Ensure LogView satisfies Overlay, HintProvider and Filterable at compile time.
 var (
 	_ Overlay      = (*LogView)(nil)
 	_ HintProvider = (*LogView)(nil)
+	_ Filterable   = (*LogView)(nil)
 )
 
 // LogViewConfig holds all parameters needed to create a LogView.
@@ -57,11 +58,14 @@ type LogViewConfig struct {
 // It supports two backends: GCS (for Cloud Build LEGACY logs) and
 // Cloud Logging API (for CLOUD_LOGGING_ONLY builds and Cloud Run).
 // When Streaming is true it polls every 2s. Press Escape or 'q' to close.
+// Press '/' to activate the filter bar and filter log lines by substring.
 type LogView struct {
 	*tview.TextView
 
-	app *App
-	cfg LogViewConfig
+	app      *App
+	cfg      LogViewConfig
+	fullText string // accumulated unfiltered log content
+	filter   string // active filter substring (lower-cased)
 
 	onClose func()
 	cancel  context.CancelFunc
@@ -131,6 +135,7 @@ func (lv *LogView) Primitive() tview.Primitive { return lv.TextView }
 func (lv *LogView) Hints() []Hint {
 	return []Hint{
 		{Key: "q/Esc", Desc: "Close"},
+		{Key: "/", Desc: "Filter"},
 	}
 }
 
@@ -142,6 +147,58 @@ func (lv *LogView) RenderLoading() {
 // OnClose implements Overlay. Called by App.PushOverlay to register the
 // dismiss callback.
 func (lv *LogView) OnClose(fn func()) { lv.onClose = fn }
+
+// SetFilter implements Filterable. Filters displayed lines to those containing
+// the needle (case-insensitive). An empty string shows all lines.
+// Must be called on the tview main goroutine.
+func (lv *LogView) SetFilter(f string) {
+	lv.filter = strings.ToLower(f)
+	lv.applyFilter()
+	lv.updateTitle()
+}
+
+// appendContent appends new content to the full log buffer and re-renders.
+// Must be called on the tview main goroutine.
+func (lv *LogView) appendContent(text string) {
+	lv.fullText += text
+	lv.applyFilter()
+}
+
+// setContent replaces the full log buffer and re-renders.
+// Must be called on the tview main goroutine.
+func (lv *LogView) setContent(text string) {
+	lv.fullText = text
+	lv.applyFilter()
+}
+
+// applyFilter re-renders the TextView from fullText, keeping only lines that
+// contain lv.filter (case-insensitive). If filter is empty all lines are shown.
+// Must be called on the tview main goroutine.
+func (lv *LogView) applyFilter() {
+	if lv.filter == "" {
+		lv.TextView.SetText(lv.fullText)
+		lv.TextView.ScrollToEnd()
+		return
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(lv.fullText, "\n") {
+		if strings.Contains(strings.ToLower(line), lv.filter) {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	lv.TextView.SetText(b.String())
+	lv.TextView.ScrollToEnd()
+}
+
+// updateTitle refreshes the border title to reflect the active filter.
+func (lv *LogView) updateTitle() {
+	if lv.filter == "" {
+		lv.TextView.SetTitle(fmt.Sprintf(" %s ", lv.cfg.Title))
+	} else {
+		lv.TextView.SetTitle(fmt.Sprintf(" %s [/%s] ", lv.cfg.Title, lv.filter))
+	}
+}
 
 // Start implements Overlay. Fetches the log and streams if configured.
 // Blocks until closed or ctx is cancelled.
@@ -206,16 +263,15 @@ func (lv *LogView) streamCloudLogging(ctx context.Context) {
 	if len(lines) == 0 {
 		lv.app.tview.QueueUpdateDraw(func() {
 			if lv.cfg.Streaming {
-				lv.TextView.SetText(" Waiting for logs…")
+				lv.setContent(" Waiting for logs…")
 			} else {
-				lv.TextView.SetText(" No log entries found.")
+				lv.setContent(" No log entries found.")
 			}
 		})
 	} else {
 		content := stripAnsi(strings.Join(lines, ""))
 		lv.app.tview.QueueUpdateDraw(func() {
-			lv.TextView.SetText(content)
-			lv.TextView.ScrollToEnd()
+			lv.setContent(content)
 		})
 	}
 
@@ -240,8 +296,7 @@ func (lv *LogView) streamCloudLogging(ctx context.Context) {
 			lastInsertID = newLastID
 			content := stripAnsi(strings.Join(newLines, ""))
 			lv.app.tview.QueueUpdateDraw(func() {
-				fmt.Fprint(lv.TextView, content)
-				lv.TextView.ScrollToEnd()
+				lv.appendContent(content)
 			})
 		}
 	}
@@ -266,9 +321,9 @@ func (lv *LogView) fetch(ctx context.Context) int64 {
 		if errors.Is(err, storage.ErrObjectNotExist) {
 			lv.app.tview.QueueUpdateDraw(func() {
 				if lv.cfg.Streaming {
-					lv.TextView.SetText(" Waiting for logs…")
+					lv.setContent(" Waiting for logs…")
 				} else {
-					lv.TextView.SetText(" No logs available.")
+					lv.setContent(" No logs available.")
 				}
 			})
 			return 0
@@ -279,8 +334,7 @@ func (lv *LogView) fetch(ctx context.Context) int64 {
 
 	content := stripAnsi(string(buf))
 	lv.app.tview.QueueUpdateDraw(func() {
-		lv.TextView.SetText(content)
-		lv.TextView.ScrollToEnd()
+		lv.setContent(content)
 	})
 	return newOffset
 }
@@ -295,8 +349,7 @@ func (lv *LogView) fetchFrom(ctx context.Context, byteOffset int64) int64 {
 
 	content := stripAnsi(string(buf))
 	lv.app.tview.QueueUpdateDraw(func() {
-		fmt.Fprint(lv.TextView, content)
-		lv.TextView.ScrollToEnd()
+		lv.appendContent(content)
 	})
 	return newOffset
 }

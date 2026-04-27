@@ -185,7 +185,15 @@ func (a *App) handleCommand(text string) {
 }
 
 // handleFilter is called on every keystroke in '/' mode.
+// If an overlay is active and implements Filterable, the filter is forwarded
+// there; otherwise it is forwarded to the active resource view.
 func (a *App) handleFilter(text string) {
+	if a.activeOverlay != nil {
+		if f, ok := a.activeOverlay.(Filterable); ok {
+			f.SetFilter(text)
+			return
+		}
+	}
 	if a.activeView != nil {
 		a.activeView.SetFilter(text)
 	}
