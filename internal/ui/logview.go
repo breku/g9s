@@ -65,11 +65,11 @@ func NewLogView(a *App, buildID, bucket, status, project, loggingMode, createTim
 		SetScrollable(true).
 		SetWordWrap(false)
 	tv.SetBorder(true)
-	tv.SetBorderColor(tcell.ColorGreen)
+	tv.SetBorderColor(AppTheme.BorderColor)
 	tv.SetTitle(fmt.Sprintf(" Build %s logs ", buildID))
 	tv.SetTitleColor(tcell.ColorWhite)
 	tv.SetTitleAlign(tview.AlignCenter)
-	tv.SetBackgroundColor(tcell.ColorDefault)
+	tv.SetBackgroundColor(AppTheme.BackgroundColor)
 
 	lv := &LogView{
 		TextView:    tv,

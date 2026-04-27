@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -33,10 +32,10 @@ func NewHeader(project string) *Header {
 
 	// Column 1 — project info.
 	projectView := tview.NewTextView().
-		SetText(" [white]g9s[darkgray] │ [yellow]project:[white] " + project).
+		SetText(" [yellow]project:[white] " + project).
 		SetTextAlign(tview.AlignLeft).
 		SetDynamicColors(true)
-	projectView.SetBackgroundColor(tcell.ColorDefault)
+	projectView.SetBackgroundColor(AppTheme.BackgroundColor)
 
 	// Column 2 — global hints, static.
 	var globalBuf strings.Builder
@@ -47,18 +46,26 @@ func NewHeader(project string) *Header {
 		SetText(globalBuf.String()).
 		SetTextAlign(tview.AlignLeft).
 		SetDynamicColors(true)
-	globalHintsView.SetBackgroundColor(tcell.ColorDefault)
+	globalHintsView.SetBackgroundColor(AppTheme.BackgroundColor)
 
 	// Column 3 — per-view hints, dynamic.
 	viewHintsView := tview.NewTextView().
 		SetTextAlign(tview.AlignLeft).
 		SetDynamicColors(true)
-	viewHintsView.SetBackgroundColor(tcell.ColorDefault)
+	viewHintsView.SetBackgroundColor(AppTheme.BackgroundColor)
+
+	// Column 4 — ASCII art.
+	asciiView := tview.NewTextView().
+		SetText(G9sAscii).
+		SetTextAlign(tview.AlignRight).
+		SetDynamicColors(true)
+	asciiView.SetBackgroundColor(AppTheme.BackgroundColor)
 
 	flex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(projectView, 0, 2, false).
 		AddItem(globalHintsView, 20, 0, false).
-		AddItem(viewHintsView, 0, 2, false)
+		AddItem(viewHintsView, 0, 2, false).
+		AddItem(asciiView, 0, 2, false)
 
 	return &Header{
 		Flex:          flex,

@@ -36,9 +36,10 @@ type CmdBar struct {
 func NewCmdBar() *CmdBar {
 	f := tview.NewInputField()
 	f.SetBorder(true)
-	f.SetBorderColor(tcell.ColorYellow)
-	f.SetFieldBackgroundColor(tcell.ColorDefault)
-	f.SetBackgroundColor(tcell.ColorDefault)
+	f.SetBorderColor(AppTheme.BorderColor)
+	f.SetBorderPadding(0, 0, 1, 1)
+	f.SetFieldBackgroundColor(AppTheme.BackgroundColor)
+	f.SetBackgroundColor(AppTheme.BackgroundColor)
 	f.SetFieldTextColor(tcell.ColorWhite)
 
 	// Native dropdown autocomplete styling.

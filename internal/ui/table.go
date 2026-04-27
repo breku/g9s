@@ -31,10 +31,10 @@ func NewResourceTable(title string) *ResourceTable {
 		SetSelectable(true, false). // row-selection mode
 		SetFixed(1, 0)              // freeze header row
 
-	t.SetBackgroundColor(tcell.ColorDefault)
+	t.SetBackgroundColor(AppTheme.BackgroundColor)
 	t.SetBorder(true)
-	t.SetBorderColor(tcell.ColorBlue)
-	t.SetTitleColor(tcell.ColorWhite)
+	t.SetBorderColor(AppTheme.BorderColor)
+	t.SetTitleColor(AppTheme.TableTitleColor)
 	t.SetTitleAlign(tview.AlignCenter)
 
 	return &ResourceTable{Table: t, title: title}
@@ -80,7 +80,7 @@ func (r *ResourceTable) repaint() {
 	// Header row — always visible.
 	for col, h := range r.lastData.Header {
 		cell := tview.NewTableCell(" " + h + " ").
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(AppTheme.TableColumnHeaderColor).
 			SetSelectable(false).
 			SetExpansion(1)
 		r.SetCell(0, col, cell)
@@ -95,7 +95,7 @@ func (r *ResourceTable) repaint() {
 		}
 
 		for col, val := range row.Columns {
-			color := tcell.ColorWhite
+			color := tcell.ColorGray
 			if col == 2 {
 				color = statusColor(val)
 			}
@@ -109,7 +109,7 @@ func (r *ResourceTable) repaint() {
 	}
 
 	// rowIdx-1 is the number of visible data rows (excluding header).
-	r.SetTitle(fmt.Sprintf(" %s [%d] ", r.title, rowIdx-1))
+	r.SetTitle(fmt.Sprintf("[::b] %s [[turquoise]%d[-]] ", r.title, rowIdx-1))
 }
 
 // rowMatchesFilter returns true if any column value contains needle (case-insensitive).

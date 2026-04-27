@@ -34,6 +34,9 @@ type App struct {
 	// viewCache stores ResourceView instances by resource key so that
 	// navigating back to an already-mounted page restores the correct view.
 	viewCache map[string]ResourceView
+
+	// headerShown tracks whether the header is currently in the root layout.
+	headerShown bool
 }
 
 // New creates and initialises a new App.
@@ -61,21 +64,15 @@ func New(cfg *config.Config) *App {
 	cmdbar.OnFilter(a.handleFilter)
 	cmdbar.OnDismiss(a.hideCmdBar)
 
-	placeholder := tview.NewTextView().
-		SetText("\n  Press [yellow]:[white] and type a resource name (e.g. [yellow]run[white]) to navigate.\n  Press [yellow]/[white] to filter the active view.").
-		SetDynamicColors(true)
-	pages.AddPage("home", placeholder, true, true)
+	pages.AddPage("home", NewWelcomeView(), true, true)
 
+	// Header is omitted on the welcome screen and added when first resource loads.
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(header, 3, 0, false).
 		AddItem(pages, 0, 1, true)
 
 	a.root = root
 
 	tv.SetRoot(root, true).EnableMouse(true)
-
-	// No active view yet — clear the view hints column.
-	a.header.SetViewHints(nil)
 
 	tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		// Let the cmdbar consume all input when it is focused.
@@ -110,6 +107,28 @@ func New(cfg *config.Config) *App {
 	})
 
 	return a
+}
+
+// showHeader inserts the header into the root layout above pages.
+// No-op if already shown. Must be called on the tview main goroutine.
+func (a *App) showHeader() {
+	if a.headerShown {
+		return
+	}
+	a.root.RemoveItem(a.pages)
+	a.root.AddItem(a.header, 5, 0, false)
+	a.root.AddItem(a.pages, 0, 1, true)
+	a.headerShown = true
+}
+
+// hideHeader removes the header from the root layout.
+// No-op if already hidden. Must be called on the tview main goroutine.
+func (a *App) hideHeader() {
+	if !a.headerShown {
+		return
+	}
+	a.root.RemoveItem(a.header)
+	a.headerShown = false
 }
 
 // Run starts the blocking event loop.
@@ -209,6 +228,8 @@ func (a *App) PopOverlay() {
 // showResource navigates to the view for the given resource key, creating it
 // on first call. Called on the main goroutine — must not block.
 func (a *App) showResource(resource string) {
+	a.showHeader()
+
 	if a.cfg.Project == "" {
 		log.Warn().Msg("no project configured; set --project or G9S_PROJECT")
 		tv := tview.NewTextView().
