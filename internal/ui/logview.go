@@ -4,19 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
-	logging "cloud.google.com/go/logging/apiv2"
-	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"cloud.google.com/go/storage"
-	"github.com/brekol/g9s/internal/gcp"
+	"github.com/brekol/g9s/internal/dao"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
-	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
 )
 
 // streamingStatuses is the set of build statuses that mean the build is still
@@ -33,54 +28,62 @@ var (
 	_ HintProvider = (*LogView)(nil)
 )
 
-// LogView is a full-screen overlay that displays a Cloud Build log.
-// For GCS-backed builds it reads log-<id>.txt; for CLOUD_LOGGING_ONLY builds
-// it reads from the Cloud Logging API. For running builds it polls every 2s.
-// Press Escape or 'q' to close.
+// LogViewConfig holds all parameters needed to create a LogView.
+// Use NewLogViewFromConfig for the generic constructor.
+type LogViewConfig struct {
+	// Title is shown in the overlay border.
+	Title string
+	// Streaming controls whether the view polls for new content every 2s.
+	Streaming bool
+
+	// --- GCS path (optional; for LEGACY/GCS_ONLY Cloud Build logs) ---
+	Bucket string // GCS bucket name without gs://
+	Object string // GCS object path
+
+	// --- Cloud Logging (used when LogFilter is non-empty) ---
+	// Project is the GCP project ID.
+	Project string
+	// LogFilter is the full Cloud Logging filter expression.
+	// When set, Cloud Logging is used regardless of Bucket.
+	LogFilter string
+	// LogSince is an optional RFC3339 timestamp lower bound appended to LogFilter
+	// for the initial fetch. Pass "" for no lower bound.
+	LogSince string
+	// LogPageSize is how many entries to fetch on initial load (default 200).
+	LogPageSize int32
+}
+
+// LogView is a full-screen overlay that displays logs.
+// It supports two backends: GCS (for Cloud Build LEGACY logs) and
+// Cloud Logging API (for CLOUD_LOGGING_ONLY builds and Cloud Run).
+// When Streaming is true it polls every 2s. Press Escape or 'q' to close.
 type LogView struct {
 	*tview.TextView
 
-	app     *App
-	buildID string
-	// GCS fields (LEGACY / GCS_ONLY builds)
-	bucket string
-	object string
-	// Cloud Logging fields (CLOUD_LOGGING_ONLY builds)
-	project     string
-	loggingMode string
-	createTime  string // RFC3339, used as timestamp lower bound for log filter
+	app *App
+	cfg LogViewConfig
 
-	streaming bool
-	onClose   func()
-	cancel    context.CancelFunc
+	onClose func()
+	cancel  context.CancelFunc
 }
 
-// NewLogView creates a LogView for the given build.
-// bucket is the GCS bucket name (without gs://); pass "" for CLOUD_LOGGING_ONLY builds.
-// loggingMode should be the Build.Options.Logging string (e.g. "CLOUD_LOGGING_ONLY", "LEGACY").
-// createTime is RFC3339 build creation time, used to scope Cloud Logging queries.
-func NewLogView(a *App, buildID, bucket, status, project, loggingMode, createTime string) *LogView {
+// NewLogViewFromConfig creates a LogView from a LogViewConfig.
+func NewLogViewFromConfig(a *App, cfg LogViewConfig) *LogView {
 	tv := tview.NewTextView().
-		SetDynamicColors(true).
+		SetDynamicColors(false).
 		SetScrollable(true).
 		SetWordWrap(false)
 	tv.SetBorder(true)
 	tv.SetBorderColor(AppTheme.HighlightColor)
-	tv.SetTitle(fmt.Sprintf(" Build %s logs ", buildID))
+	tv.SetTitle(fmt.Sprintf(" %s ", cfg.Title))
 	tv.SetTitleColor(tcell.ColorWhite)
 	tv.SetTitleAlign(tview.AlignCenter)
 	tv.SetBackgroundColor(AppTheme.BackgroundColor)
 
 	lv := &LogView{
-		TextView:    tv,
-		app:         a,
-		buildID:     buildID,
-		bucket:      bucket,
-		object:      fmt.Sprintf("log-%s.txt", buildID),
-		project:     project,
-		loggingMode: loggingMode,
-		createTime:  createTime,
-		streaming:   streamingStatuses[status],
+		TextView: tv,
+		app:      a,
+		cfg:      cfg,
 	}
 
 	tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -92,6 +95,33 @@ func NewLogView(a *App, buildID, bucket, status, project, loggingMode, createTim
 	})
 
 	return lv
+}
+
+// NewLogView creates a LogView for the given Cloud Build build.
+// bucket is the GCS bucket name (without gs://); pass "" for CLOUD_LOGGING_ONLY builds.
+// loggingMode should be the Build.Options.Logging string (e.g. "CLOUD_LOGGING_ONLY", "LEGACY").
+// createTime is RFC3339 build creation time, used to scope Cloud Logging queries.
+func NewLogView(a *App, buildID, bucket, status, project, loggingMode, createTime string) *LogView {
+	cfg := LogViewConfig{
+		Title:     fmt.Sprintf("Build %s logs", buildID),
+		Streaming: streamingStatuses[status],
+		Bucket:    bucket,
+		Project:   project,
+	}
+	if bucket != "" {
+		cfg.Object = fmt.Sprintf("log-%s.txt", buildID)
+	}
+	if loggingMode == "CLOUD_LOGGING_ONLY" || bucket == "" {
+		since := createTime
+		if since == "" {
+			since = "1970-01-01T00:00:00Z"
+		}
+		cfg.LogFilter = fmt.Sprintf(
+			`logName="projects/%s/logs/cloudbuild" AND resource.type="build" AND resource.labels.build_id="%s" AND timestamp>="%s"`,
+			project, buildID, since,
+		)
+	}
+	return NewLogViewFromConfig(a, cfg)
 }
 
 // Primitive implements Overlay.
@@ -106,34 +136,28 @@ func (lv *LogView) Hints() []Hint {
 
 // RenderLoading implements Overlay. Shows a placeholder before the first fetch completes.
 func (lv *LogView) RenderLoading() {
-	lv.TextView.SetText(fmt.Sprintf(" Loading logs for build %s…", lv.buildID))
+	lv.TextView.SetText(fmt.Sprintf(" Loading %s…", lv.cfg.Title))
 }
 
 // OnClose implements Overlay. Called by App.PushOverlay to register the
 // dismiss callback.
 func (lv *LogView) OnClose(fn func()) { lv.onClose = fn }
 
-// Start implements Overlay. Fetches the log and streams if the build is running.
+// Start implements Overlay. Fetches the log and streams if configured.
 // Blocks until closed or ctx is cancelled.
 func (lv *LogView) Start(parentCtx context.Context) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	lv.cancel = cancel
 	defer cancel()
 
-	opts, err := gcp.ClientOptions(ctx)
-	if err != nil {
-		lv.appendError(fmt.Errorf("credentials: %w", err))
+	if lv.cfg.LogFilter != "" {
+		lv.streamCloudLogging(ctx)
 		return
 	}
 
-	if lv.loggingMode == "CLOUD_LOGGING_ONLY" {
-		lv.streamCloudLogging(ctx, opts)
-		return
-	}
+	offset := lv.fetch(ctx)
 
-	offset := lv.fetch(ctx, opts)
-
-	if !lv.streaming {
+	if !lv.cfg.Streaming {
 		return
 	}
 
@@ -145,12 +169,9 @@ func (lv *LogView) Start(parentCtx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			newOffset := lv.fetchFrom(ctx, opts, offset)
+			newOffset := lv.fetchFrom(ctx, offset)
 			if newOffset > offset {
 				offset = newOffset
-			}
-			if !lv.streaming {
-				return
 			}
 		}
 	}
@@ -167,96 +188,62 @@ func (lv *LogView) close() {
 	}
 }
 
-// streamCloudLogging fetches log entries from the Cloud Logging API.
-// For running builds it polls every 2s, appending only new entries.
-func (lv *LogView) streamCloudLogging(ctx context.Context, opts []option.ClientOption) {
-	client, err := logging.NewClient(ctx, opts...)
-	if err != nil {
-		lv.appendError(fmt.Errorf("logging client: %w", err))
+// streamCloudLogging fetches log entries from the Cloud Logging API via the
+// dao.FetchCloudLoggingPage function. Polls every 2s when Streaming is true.
+// Uses desc-order initial fetch for speed, then asc polling with a timestamp cursor.
+func (lv *LogView) streamCloudLogging(ctx context.Context) {
+	pageSize := lv.cfg.LogPageSize
+	if pageSize == 0 {
+		pageSize = 200
+	}
+
+	// --- Initial load: fetch desc, reversed — fast even on busy services ---
+	lines, pollSince, newestInsertID, err := dao.FetchCloudLoggingInitial(ctx, lv.cfg.Project, lv.cfg.LogFilter, lv.cfg.LogSince, pageSize)
+	if err != nil && ctx.Err() == nil {
+		log.Error().Err(err).Str("title", lv.cfg.Title).Msg("logview: initial fetch")
+	}
+
+	if len(lines) == 0 {
+		lv.app.tview.QueueUpdateDraw(func() {
+			if lv.cfg.Streaming {
+				lv.TextView.SetText(" Waiting for logs…")
+			} else {
+				lv.TextView.SetText(" No log entries found.")
+			}
+		})
+	} else {
+		content := stripAnsi(strings.Join(lines, ""))
+		lv.app.tview.QueueUpdateDraw(func() {
+			lv.TextView.SetText(content)
+			lv.TextView.ScrollToEnd()
+		})
+	}
+
+	if !lv.cfg.Streaming {
 		return
 	}
-	defer client.Close()
 
-	since := lv.createTime
-	if since == "" {
-		since = time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
-	}
+	// --- Poll: asc from the newest entry seen so far ---
+	since := pollSince
+	lastInsertID := newestInsertID
 
-	lastInsertID := ""
-	first := true
-
-	fetch := func() {
-		filter := fmt.Sprintf(
-			`logName="projects/%s/logs/cloudbuild" AND resource.type="build" AND resource.labels.build_id="%s" AND timestamp>="%s"`,
-			lv.project, lv.buildID, since,
-		)
-
-		it := client.ListLogEntries(ctx, &loggingpb.ListLogEntriesRequest{
-			ResourceNames: []string{"projects/" + lv.project},
-			Filter:        filter,
-			OrderBy:       "timestamp asc",
-			PageSize:      1000,
-		})
-
-		var newLines []string
-		found := (lastInsertID == "")
-		for {
-			entry, err := it.Next()
-			if err == iterator.Done {
-				break
+	poll := func() {
+		newLines, newLastID, newSince, pollErr := dao.FetchCloudLoggingPage(ctx, lv.cfg.Project, lv.cfg.LogFilter, since, lastInsertID)
+		if pollErr != nil {
+			if ctx.Err() == nil {
+				log.Error().Err(pollErr).Str("title", lv.cfg.Title).Msg("logview: poll fetch")
 			}
-			if err != nil {
-				if ctx.Err() == nil {
-					log.Error().Err(err).Str("build", lv.buildID).Msg("logview: cloud logging fetch")
-				}
-				break
-			}
-			if !found {
-				if entry.InsertId == lastInsertID {
-					found = true
-				}
-				continue
-			}
-			text := entry.GetTextPayload()
-			if text != "" {
-				if !strings.HasSuffix(text, "\n") {
-					text += "\n"
-				}
-				newLines = append(newLines, text)
-				lastInsertID = entry.InsertId
-			}
-		}
-
-		if len(newLines) == 0 && first {
-			lv.app.tview.QueueUpdateDraw(func() {
-				if lv.streaming {
-					lv.TextView.SetText(" Waiting for logs…")
-				} else {
-					lv.TextView.SetText(" No log entries found for this build.")
-				}
-			})
-			first = false
 			return
 		}
-
 		if len(newLines) > 0 {
+			since = newSince
+			lastInsertID = newLastID
 			content := stripAnsi(strings.Join(newLines, ""))
 			lv.app.tview.QueueUpdateDraw(func() {
-				if first {
-					lv.TextView.SetText(content)
-					first = false
-				} else {
-					fmt.Fprint(lv.TextView, content)
-				}
+				fmt.Fprint(lv.TextView, content)
 				lv.TextView.ScrollToEnd()
 			})
 		}
-	}
-
-	fetch()
-
-	if !lv.streaming {
-		return
 	}
 
 	ticker := time.NewTicker(2 * time.Second)
@@ -266,46 +253,27 @@ func (lv *LogView) streamCloudLogging(ctx context.Context, opts []option.ClientO
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fetch()
-			if !lv.streaming {
-				return
-			}
+			poll()
 		}
 	}
 }
 
 // fetch reads the entire GCS log object and writes it to the view.
 // Returns the total number of bytes read (0 if the object doesn't exist yet).
-func (lv *LogView) fetch(ctx context.Context, opts []option.ClientOption) int64 {
-	client, err := storage.NewClient(ctx, opts...)
+func (lv *LogView) fetch(ctx context.Context) int64 {
+	buf, newOffset, err := dao.FetchGCSRange(ctx, lv.cfg.Bucket, lv.cfg.Object, 0)
 	if err != nil {
-		lv.appendError(fmt.Errorf("storage client: %w", err))
-		return 0
-	}
-	defer client.Close()
-
-	log.Debug().Str("bucket", lv.bucket).Str("object", lv.object).Msg("logview: opening object")
-	rc, err := client.Bucket(lv.bucket).Object(lv.object).NewReader(ctx)
-	if err != nil {
-		log.Debug().Err(err).Str("bucket", lv.bucket).Str("object", lv.object).Msg("logview: open error")
-		if isNotExist(err) {
+		if errors.Is(err, storage.ErrObjectNotExist) {
 			lv.app.tview.QueueUpdateDraw(func() {
-				if lv.streaming {
+				if lv.cfg.Streaming {
 					lv.TextView.SetText(" Waiting for logs…")
 				} else {
-					lv.TextView.SetText(" No logs available for this build.")
+					lv.TextView.SetText(" No logs available.")
 				}
 			})
 			return 0
 		}
-		lv.appendError(fmt.Errorf("open log: %w", err))
-		return 0
-	}
-	defer rc.Close()
-
-	buf, err := io.ReadAll(rc)
-	if err != nil {
-		lv.appendError(fmt.Errorf("read log: %w", err))
+		lv.appendError(err)
 		return 0
 	}
 
@@ -314,27 +282,13 @@ func (lv *LogView) fetch(ctx context.Context, opts []option.ClientOption) int64 
 		lv.TextView.SetText(content)
 		lv.TextView.ScrollToEnd()
 	})
-	return int64(len(buf))
+	return newOffset
 }
 
 // fetchFrom reads bytes starting at byteOffset and appends them to the view.
 // Returns the new offset after the read.
-func (lv *LogView) fetchFrom(ctx context.Context, opts []option.ClientOption, byteOffset int64) int64 {
-	client, err := storage.NewClient(ctx, opts...)
-	if err != nil {
-		log.Error().Err(err).Msg("logview: storage client")
-		return byteOffset
-	}
-	defer client.Close()
-
-	obj := client.Bucket(lv.bucket).Object(lv.object)
-	rc, err := obj.NewRangeReader(ctx, byteOffset, -1)
-	if err != nil {
-		return byteOffset
-	}
-	defer rc.Close()
-
-	buf, err := io.ReadAll(rc)
+func (lv *LogView) fetchFrom(ctx context.Context, byteOffset int64) int64 {
+	buf, newOffset, err := dao.FetchGCSRange(ctx, lv.cfg.Bucket, lv.cfg.Object, byteOffset)
 	if err != nil || len(buf) == 0 {
 		return byteOffset
 	}
@@ -344,13 +298,12 @@ func (lv *LogView) fetchFrom(ctx context.Context, opts []option.ClientOption, by
 		fmt.Fprint(lv.TextView, content)
 		lv.TextView.ScrollToEnd()
 	})
-
-	return byteOffset + int64(len(buf))
+	return newOffset
 }
 
 // appendError writes an error message into the text view.
 func (lv *LogView) appendError(err error) {
-	log.Error().Err(err).Str("build", lv.buildID).Msg("logview fetch failed")
+	log.Error().Err(err).Str("title", lv.cfg.Title).Msg("logview fetch failed")
 	lv.app.tview.QueueUpdateDraw(func() {
 		fmt.Fprintf(lv.TextView, "\n[red]Error: %v[white]\n", err)
 	})
@@ -379,9 +332,4 @@ func stripAnsi(s string) string {
 
 func isAnsiEnd(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-// isNotExist returns true if the error indicates a GCS object does not exist.
-func isNotExist(err error) bool {
-	return errors.Is(err, storage.ErrObjectNotExist)
 }

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/model"
@@ -61,6 +62,7 @@ func (v *CloudRunView) Hints() []Hint {
 	return []Hint{
 		{Key: "d", Desc: "Describe"},
 		{Key: "y", Desc: "YAML"},
+		{Key: "l", Desc: "Logs"},
 	}
 }
 
@@ -71,6 +73,8 @@ func (v *CloudRunView) HandleKey(event *tcell.EventKey) bool {
 		return v.openDescribe(false)
 	case 'y':
 		return v.openDescribe(true)
+	case 'l':
+		return v.openLogs()
 	}
 	return false
 }
@@ -102,6 +106,36 @@ func (v *CloudRunView) openDescribe(asYAML bool) bool {
 
 	dv := NewDescribeView(v.app, title, fetchFn)
 	v.app.PushOverlay(dv)
+	return true
+}
+
+// openLogs pushes a LogView overlay streaming all Cloud Run logs for the selected service.
+func (v *CloudRunView) openLogs() bool {
+	row := v.SelectedRow()
+	if row == nil {
+		return true
+	}
+	// row.ID format: projects/<project>/locations/<location>/services/<name>
+	svcName := lastSegmentUI(row.ID)
+	project := projectFromResourceName(row.ID)
+	region := regionFromResourceName(row.ID)
+
+	filter := fmt.Sprintf(`resource.type="cloud_run_revision" AND resource.labels.service_name="%s"`, svcName)
+	if region != "" {
+		filter += fmt.Sprintf(` AND resource.labels.location="%s"`, region)
+	}
+
+	cfg := LogViewConfig{
+		Title:     fmt.Sprintf("Logs – %s", svcName),
+		Streaming: true,
+		Project:   project,
+		LogFilter: filter,
+		// 24h window mirroring gcloud default; desc fetch makes it fast.
+		LogSince:    time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339),
+		LogPageSize: 200,
+	}
+	lv := NewLogViewFromConfig(v.app, cfg)
+	v.app.PushOverlay(lv)
 	return true
 }
 
@@ -145,4 +179,26 @@ func splitSlash(s string) []string {
 		}
 	}
 	return append(parts, s[start:])
+}
+
+// projectFromResourceName extracts the project ID from a GCP resource name.
+// Format: projects/<project>/...
+func projectFromResourceName(name string) string {
+	parts := splitSlash(name)
+	// index 0 = "projects", index 1 = project ID
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return ""
+}
+
+// regionFromResourceName extracts the location/region from a GCP resource name.
+// Format: projects/<project>/locations/<location>/...
+func regionFromResourceName(name string) string {
+	parts := splitSlash(name)
+	// index 2 = "locations", index 3 = location value
+	if len(parts) >= 4 {
+		return parts[3]
+	}
+	return ""
 }
