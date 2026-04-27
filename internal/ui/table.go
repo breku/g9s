@@ -33,7 +33,7 @@ func NewResourceTable(title string) *ResourceTable {
 
 	t.SetBackgroundColor(AppTheme.BackgroundColor)
 	t.SetBorder(true)
-	t.SetBorderColor(AppTheme.BorderColor)
+	t.SetBorderColor(AppTheme.HighlightColor)
 	t.SetTitleColor(AppTheme.TableTitleColor)
 	t.SetTitleAlign(tview.AlignCenter)
 
@@ -94,12 +94,9 @@ func (r *ResourceTable) repaint() {
 			continue
 		}
 
-		for col, val := range row.Columns {
-			color := tcell.ColorGray
-			if col == 2 {
-				color = statusColor(val)
-			}
-			cell := tview.NewTableCell(" " + val + " ").
+		color := rowTypeColor(row.Type)
+		for col, c := range row.Columns {
+			cell := tview.NewTableCell(" " + c.Text + " ").
 				SetTextColor(color).
 				SetExpansion(1)
 			r.SetCell(rowIdx, col, cell)
@@ -114,25 +111,21 @@ func (r *ResourceTable) repaint() {
 
 // rowMatchesFilter returns true if any column value contains needle (case-insensitive).
 func rowMatchesFilter(row dao.Row, needle string) bool {
-	for _, val := range row.Columns {
-		if strings.Contains(strings.ToLower(val), needle) {
+	for _, col := range row.Columns {
+		if strings.Contains(strings.ToLower(col.Text), needle) {
 			return true
 		}
 	}
 	return false
 }
 
-// statusColor maps a status string to a tcell colour for quick visual scanning.
-func statusColor(status string) tcell.Color {
-	switch status {
-	case "Ready", "Success":
-		return tcell.ColorGreen
-	case "Failed", "Failure", "Internal Error", "Expired":
+// rowTypeColor maps a RowType to a tcell colour.
+func rowTypeColor(t dao.RowType) tcell.Color {
+	switch t {
+	case dao.RowTypeActive:
+		return AppTheme.HighlightColor
+	case dao.RowTypeError:
 		return tcell.ColorRed
-	case "Deploying", "Working", "Queued", "Pending":
-		return tcell.ColorYellow
-	case "Cancelled", "Timeout":
-		return tcell.ColorOrange
 	default:
 		return tcell.ColorGray
 	}

@@ -149,6 +149,15 @@ func rowFromBuild(b *cloudbuildpb.Build) Row {
 	}
 
 	status := buildStatus(b.Status)
+
+	rowType := RowTypeNotActive
+	switch status {
+	case "Working", "Queued", "Pending":
+		rowType = RowTypeActive
+	case "Failure", "Internal Error", "Expired", "Timeout":
+		rowType = RowTypeError
+	}
+
 	started := "—"
 	if b.StartTime != nil {
 		started = formatTime(b.StartTime.AsTime())
@@ -171,8 +180,17 @@ func rowFromBuild(b *cloudbuildpb.Build) Row {
 	}
 
 	return Row{
-		ID:      b.Name,
-		Columns: []string{id, trigger, status, started, duration, branch, images},
+		ID:   b.Name,
+		Type: rowType,
+		Columns: []Column{
+			{Text: id},
+			{Text: trigger},
+			{Text: status},
+			{Text: started},
+			{Text: duration},
+			{Text: branch},
+			{Text: images},
+		},
 		Meta: map[string]string{
 			"buildId":     b.Id,
 			"logsBucket":  strings.TrimPrefix(b.LogsBucket, "gs://"),

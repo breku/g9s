@@ -64,16 +64,29 @@ func (c *CloudRun) List(ctx context.Context, project string) (*TableData, error)
 
 // rowFromService converts a Cloud Run Service proto to a table Row.
 func rowFromService(svc *runpb.Service) Row {
-	// Name is "projects/P/locations/REGION/services/NAME" — extract the short name.
 	name := lastSegment(svc.Name)
 	region := locationFromName(svc.Name)
 	status := conditionState(svc.TerminalCondition)
 	url := svc.Uri
 	deployed := formatTime(svc.UpdateTime.AsTime())
 
+	colType := RowTypeNotActive
+	if status == "Ready" {
+		colType = RowTypeActive
+	} else if status == "Failed" {
+		colType = RowTypeError
+	}
+
 	return Row{
-		ID:      svc.Name,
-		Columns: []string{name, region, status, url, deployed},
+		ID:   svc.Name,
+		Type: colType,
+		Columns: []Column{
+			{Text: name},
+			{Text: region},
+			{Text: status},
+			{Text: url},
+			{Text: deployed},
+		},
 	}
 }
 

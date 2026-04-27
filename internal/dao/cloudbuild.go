@@ -73,6 +73,11 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
 		status = "Disabled"
 	}
 
+	colType := RowTypeNotActive
+	if !t.Disabled {
+		colType = RowTypeActive
+	}
+
 	event := triggerEvent(t)
 	repo := triggerRepo(t)
 	created := "—"
@@ -86,8 +91,16 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
 	}
 
 	return Row{
-		ID:      t.ResourceName,
-		Columns: []string{name, desc, status, event, repo, created},
+		ID:   t.ResourceName,
+		Type: colType,
+		Columns: []Column{
+			{Text: name},
+			{Text: desc},
+			{Text: status},
+			{Text: event},
+			{Text: repo},
+			{Text: created},
+		},
 	}
 }
 

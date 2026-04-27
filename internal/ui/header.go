@@ -32,7 +32,7 @@ func NewHeader(project string) *Header {
 
 	// Column 1 — project info.
 	projectView := tview.NewTextView().
-		SetText(" [yellow]project:[white] " + project).
+		SetText(" [turquoise]project:[white] " + project).
 		SetTextAlign(tview.AlignLeft).
 		SetDynamicColors(true)
 	projectView.SetBackgroundColor(AppTheme.BackgroundColor)
@@ -40,7 +40,7 @@ func NewHeader(project string) *Header {
 	// Column 2 — global hints, static.
 	var globalBuf strings.Builder
 	for _, h := range globalHints {
-		fmt.Fprintf(&globalBuf, " [yellow]<%s>[white] %s\n", h.Key, h.Desc)
+		fmt.Fprintf(&globalBuf, " [turquoise]<%s>[white] %s\n", h.Key, h.Desc)
 	}
 	globalHintsView := tview.NewTextView().
 		SetText(globalBuf.String()).
@@ -82,7 +82,7 @@ func (h *Header) SetViewHints(hp HintProvider) {
 	}
 	var b strings.Builder
 	for _, hint := range hp.Hints() {
-		fmt.Fprintf(&b, " [yellow]<%s>[white] %s\n", hint.Key, hint.Desc)
+		fmt.Fprintf(&b, " [turquoise]<%s>[white] %s\n", hint.Key, hint.Desc)
 	}
 	h.viewHintsView.SetText(b.String())
 }

@@ -8,6 +8,24 @@ import (
 	"context"
 )
 
+// RowType indicates the semantic state of a column value, used by the UI
+// to apply colour coding independent of column position or string content.
+type RowType int
+
+const (
+	// RowTypeNotActive is the default — rendered in grey.
+	RowTypeNotActive RowType = iota
+	// RowTypeActive indicates a healthy / running / enabled state — rendered in green.
+	RowTypeActive
+	// RowTypeError indicates a failed / degraded state — rendered in red.
+	RowTypeError
+)
+
+// Column is a single cell value in a Row.
+type Column struct {
+	Text string
+}
+
 // Row represents a single resource row returned by a DAO.
 // Columns must match the headers returned by the same DAO's Header() method.
 // Meta carries DAO-specific metadata that the view layer may use for actions
@@ -15,7 +33,8 @@ import (
 type Row struct {
 	// ID is the fully-qualified resource name, used to identify the row.
 	ID      string
-	Columns []string
+	Type    RowType
+	Columns []Column
 	// Meta holds arbitrary key-value metadata set by the DAO.
 	Meta map[string]string
 }

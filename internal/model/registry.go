@@ -26,19 +26,11 @@ var Registry = map[string]ResourceMeta{
 // Aliases maps shorthand command names to canonical registry keys.
 // Keep entries sorted for deterministic autocomplete ordering.
 var Aliases = map[string]string{
-	"cloud-run":     "cloudrun",
-	"cloudrun":      "cloudrun",
-	"run":           "cloudrun",
-	"cloud-build":   "cloudbuild",
-	"cloudbuild":    "cloudbuild",
-	"build":         "cloudbuild",
-	"cb":            "cloudbuild",
-	"buildhistory":  "buildhistory",
-	"build-history": "buildhistory",
-	"builds":        "buildhistory",
-	"history":       "buildhistory",
-	"q":             "_quit",
-	"quit":          "_quit",
+	"cloudrun":     "cloudrun",
+	"triggers":     "cloudbuild",
+	"buildhistory": "buildhistory",
+	"q":            "_quit",
+	"quit":         "_quit",
 }
 
 // Lookup returns the ResourceMeta for the given resource key.
