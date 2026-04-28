@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -64,6 +66,7 @@ func (v *CloudRunView) Hints() []Hint {
 	return []Hint{
 		{Key: "d", Desc: "Describe"},
 		{Key: "y", Desc: "YAML"},
+		{Key: "e", Desc: "Edit"},
 		{Key: "l", Desc: "Logs"},
 		{Key: "c", Desc: "Copy URL"},
 	}
@@ -76,12 +79,106 @@ func (v *CloudRunView) HandleKey(event *tcell.EventKey) bool {
 		return v.openDescribe(false)
 	case 'y':
 		return v.openDescribe(true)
+	case 'e':
+		return v.editService()
 	case 'l':
 		return v.openLogs()
 	case 'c':
 		return v.copyURL()
 	}
 	return false
+}
+
+// editService suspends the TUI, opens $EDITOR (default: vim) on the selected
+// service's YAML, and applies the changes when the editor exits cleanly.
+// On API or parse error, an error overlay is pushed when the TUI resumes.
+func (v *CloudRunView) editService() bool {
+	row := v.SelectedRow()
+	if row == nil {
+		return true
+	}
+	name := row.ID
+	short := lastSegmentUI(name)
+
+	// Fetch current YAML before suspending so any error is visible in the TUI.
+	yamlStr, err := dao.DescribeYAML(v.app.ctx, name)
+	if err != nil {
+		log.Error().Err(err).Str("service", name).Msg("cloudrun: fetch for edit failed")
+		v.showEditError(short, err)
+		return true
+	}
+
+	// Run the editor + API call inside Suspend so tcell releases the terminal.
+	var editErr error
+	ok := v.app.tview.Suspend(func() {
+		editErr = runEditorAndUpdate(v.app.ctx, short, yamlStr)
+	})
+	if !ok {
+		log.Warn().Msg("cloudrun: tview.Suspend returned false (already suspended)")
+		return true
+	}
+	if editErr != nil {
+		log.Error().Err(editErr).Str("service", name).Msg("cloudrun: edit failed")
+		v.showEditError(short, editErr)
+		return true
+	}
+	log.Info().Str("service", name).Msg("cloudrun: service updated")
+	return true
+}
+
+// showEditError displays the error in a DescribeView overlay so the user can
+// scroll through long messages (e.g. validation errors from the API).
+func (v *CloudRunView) showEditError(shortName string, err error) {
+	msg := err.Error()
+	dv := NewDescribeView(v.app, fmt.Sprintf("Edit failed – %s", shortName),
+		func(context.Context) (string, error) {
+			return "[red]" + msg + "[white]", nil
+		})
+	v.app.PushOverlay(dv)
+}
+
+// runEditorAndUpdate writes the YAML to a temp file, opens $EDITOR on it,
+// and on clean exit applies the resulting YAML via the Cloud Run API.
+// If the file is unchanged, the API call is skipped.
+func runEditorAndUpdate(ctx context.Context, shortName, original string) error {
+	tmp, err := os.CreateTemp("", "g9s-cloudrun-"+shortName+"-*.yaml")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.WriteString(original); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vim"
+	}
+
+	cmd := exec.Command(editor, tmpPath)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("editor exited with error: %w", err)
+	}
+
+	edited, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return fmt.Errorf("read edited file: %w", err)
+	}
+	if string(edited) == original {
+		// Nothing changed — skip the API call.
+		return nil
+	}
+
+	return dao.UpdateServiceFromYAML(ctx, string(edited))
 }
 
 // copyURL copies the selected service's URL to the system clipboard.

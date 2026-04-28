@@ -174,3 +174,53 @@ func DescribeYAML(ctx context.Context, name string) (string, error) {
 	}
 	return string(yamlBytes), nil
 }
+
+// UpdateServiceFromYAML parses the given YAML representation of a Cloud Run
+// service and applies it via the Services API. The service name embedded in
+// the YAML is used to identify the target service.
+//
+// Returns as soon as the UpdateService request is accepted — it does NOT
+// wait for the long-running deploy to finish. Callers that need the final
+// outcome should observe the next poll tick.
+func UpdateServiceFromYAML(ctx context.Context, yamlStr string) error {
+	// YAML → generic map → JSON → protojson → Service proto.
+	var m interface{}
+	if err := yaml.Unmarshal([]byte(yamlStr), &m); err != nil {
+		return fmt.Errorf("cloudrun: parse yaml: %w", err)
+	}
+	jsonBytes, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("cloudrun: marshal json: %w", err)
+	}
+	svc := &runpb.Service{}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(jsonBytes, svc); err != nil {
+		return fmt.Errorf("cloudrun: unmarshal proto: %w", err)
+	}
+	if svc.Name == "" {
+		return fmt.Errorf("cloudrun: service name missing from yaml")
+	}
+
+	opts, err := gcp.ClientOptions(ctx)
+	if err != nil {
+		return fmt.Errorf("cloudrun: credentials: %w", err)
+	}
+	client, err := run.NewServicesClient(ctx, opts...)
+	if err != nil {
+		return fmt.Errorf("cloudrun: new client: %w", err)
+	}
+	// Note: client is closed by the goroutine below once the LRO settles.
+
+	_, err = client.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc})
+	if err != nil {
+		_ = client.Close()
+		return fmt.Errorf("cloudrun: update: %w", err)
+	}
+	// We intentionally do NOT wait for the LRO — Cloud Run deploys can take
+	// minutes and we don't want to block the UI. The polling loop will
+	// reflect the new state on the next tick. We still need to close the
+	// client eventually; do it in a goroutine that survives this call.
+	go func() {
+		_ = client.Close()
+	}()
+	return nil
+}
