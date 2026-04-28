@@ -57,13 +57,13 @@ func (v *CloudBuildView) SetFilter(f string) {
 // Hints implements HintProvider.
 func (v *CloudBuildView) Hints() []Hint {
 	return []Hint{
-		{Key: "r", Desc: "Run"},
+		{Key: "t", Desc: "trigger build"},
 	}
 }
 
 // HandleKey implements KeyHandler.
 func (v *CloudBuildView) HandleKey(event *tcell.EventKey) bool {
-	if event.Rune() == 'r' {
+	if event.Rune() == 't' {
 		return v.openRunOverlay()
 	}
 	return false
