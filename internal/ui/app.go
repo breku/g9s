@@ -75,8 +75,11 @@ func New(cfg *config.Config) *App {
 	tv.SetRoot(root, true).EnableMouse(true)
 
 	tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Let the cmdbar consume all input when it is focused.
-		if cmdbar.HasFocus() {
+		// Let the cmdbar consume all input when it is shown.
+		// We use a.cmdbarShown rather than cmdbar.HasFocus() because in
+		// recent tview versions an InputField removed from the layout can
+		// still report focus, which would permanently swallow ':' and '/'.
+		if a.cmdbarShown {
 			return event
 		}
 
@@ -163,11 +166,18 @@ func (a *App) showCmdBar(mode cmdMode) {
 
 // hideCmdBar removes the command bar from the layout and returns focus to pages.
 func (a *App) hideCmdBar() {
-	if a.cmdbarShown {
-		a.root.RemoveItem(a.cmdbar)
-		a.cmdbarShown = false
+	if !a.cmdbarShown {
+		return
 	}
+	// Transfer focus to pages BEFORE removing the cmdbar from the layout.
+	// Application.SetFocus walks the focus chain to find the currently
+	// focused primitive (so it can blur it and call screen.HideCursor).
+	// If we remove the cmdbar first, it's no longer reachable from root,
+	// the blur chain comes up empty, and the cursor stays painted from
+	// the cmdbar's last draw.
 	a.tview.SetFocus(a.pages)
+	a.root.RemoveItem(a.cmdbar)
+	a.cmdbarShown = false
 }
 
 // handleCommand is called when the user submits a ':' command.
