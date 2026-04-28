@@ -18,7 +18,7 @@ import (
 //   - The cost/quota weight of the List API call.
 //   - User expectation of how "live" the data should feel.
 var Registry = map[string]ResourceMeta{
-	"cloudrun":     {DAO: new(dao.CloudRun), TTL: 60 * time.Second},
+	"cloudrun":     {DAO: new(dao.CloudRun), TTL: 30 * time.Second},
 	"cloudbuild":   {DAO: new(dao.CloudBuild), TTL: 30 * time.Second},
 	"buildhistory": {DAO: new(dao.BuildHistory), TTL: 15 * time.Second},
 }

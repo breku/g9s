@@ -25,7 +25,7 @@ func (c *CloudRun) Resource() string { return "cloudrun" }
 
 // Header returns the column headers for the Cloud Run table view.
 func (c *CloudRun) Header() []string {
-	return []string{"NAME", "REGION", "STATUS", "URL", "LAST DEPLOYED"}
+	return []string{"NAME", "REGION", "STATUS", "URL", "LAST DEPLOYED", "DEPLOYED BY"}
 }
 
 // List fetches all Cloud Run services across all regions in the given project.
@@ -72,6 +72,10 @@ func rowFromService(svc *runpb.Service) Row {
 	status := conditionState(svc.TerminalCondition)
 	url := svc.Uri
 	deployed := formatTime(svc.UpdateTime.AsTime())
+	deployedBy := svc.LastModifier
+	if deployedBy == "" {
+		deployedBy = "—"
+	}
 
 	colType := RowTypeNotActive
 	if status == "Ready" {
@@ -92,6 +96,7 @@ func rowFromService(svc *runpb.Service) Row {
 			{Text: status},
 			{Text: url},
 			{Text: deployed},
+			{Text: deployedBy},
 		},
 	}
 }
