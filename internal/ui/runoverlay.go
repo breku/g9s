@@ -144,7 +144,7 @@ func (ro *RunOverlay) submit() {
 	}
 
 	// Update UI directly — we're already on the main goroutine.
-	ro.status.SetText("[yellow]Triggering build…")
+	ro.status.SetText(" [yellow]Triggering build…")
 	ro.input.SetDisabled(true)
 
 	go func() {
