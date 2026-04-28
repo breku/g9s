@@ -93,6 +93,11 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
 	return Row{
 		ID:   t.ResourceName,
 		Type: colType,
+		Meta: map[string]string{
+			"triggerId": t.Id,
+			"project":   projectFromResourceName(t.ResourceName),
+			"branch":    triggerBranch(t),
+		},
 		Columns: []Column{
 			{Text: name},
 			{Text: desc},
@@ -104,7 +109,67 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
 	}
 }
 
-// triggerEvent determines the event source type of the trigger.
+// triggerBranch extracts the configured branch from a trigger, trying
+// TriggerTemplate, SourceToBuild.Ref, and GitHub push event in order.
+func triggerBranch(t *cloudbuildpb.BuildTrigger) string {
+	if t.TriggerTemplate != nil && t.TriggerTemplate.GetBranchName() != "" {
+		return t.TriggerTemplate.GetBranchName()
+	}
+	if t.SourceToBuild != nil && t.SourceToBuild.Ref != "" {
+		// Ref is typically "refs/heads/<branch>" — strip the prefix for display.
+		ref := t.SourceToBuild.Ref
+		if after, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+			return after
+		}
+		return ref
+	}
+	if t.Github != nil {
+		if push := t.Github.GetPush(); push != nil && push.GetBranch() != "" {
+			branch := push.GetBranch()
+			branch = strings.TrimPrefix(branch, "^")
+			branch = strings.TrimSuffix(branch, "$")
+			return branch
+		}
+	}
+	return ""
+}
+
+// projectFromResourceName extracts the project ID from a GCP resource name.
+// Format: projects/<project>/...
+func projectFromResourceName(name string) string {
+	parts := strings.Split(name, "/")
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return ""
+}
+
+// RunTrigger triggers a Cloud Build run for the given trigger ID and branch.
+func RunTrigger(ctx context.Context, project, triggerID, branch string) error {
+	opts, err := gcp.ClientOptions(ctx)
+	if err != nil {
+		return fmt.Errorf("cloudbuild: credentials: %w", err)
+	}
+	client, err := cloudbuild.NewClient(ctx, opts...)
+	if err != nil {
+		return fmt.Errorf("cloudbuild: new client: %w", err)
+	}
+	defer client.Close()
+
+	req := &cloudbuildpb.RunBuildTriggerRequest{
+		ProjectId: project,
+		TriggerId: triggerID,
+		Source: &cloudbuildpb.RepoSource{
+			Revision: &cloudbuildpb.RepoSource_BranchName{
+				BranchName: branch,
+			},
+		},
+	}
+	if _, err := client.RunBuildTrigger(ctx, req); err != nil {
+		return fmt.Errorf("cloudbuild: run trigger: %w", err)
+	}
+	return nil
+}
 func triggerEvent(t *cloudbuildpb.BuildTrigger) string {
 	if t.WebhookConfig != nil {
 		return "Webhook"

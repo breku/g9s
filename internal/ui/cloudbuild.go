@@ -6,6 +6,7 @@ import (
 
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/model"
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -17,8 +18,12 @@ type CloudBuildView struct {
 	mdl *model.Table
 }
 
-// Ensure interface is satisfied at compile time.
-var _ ResourceView = (*CloudBuildView)(nil)
+// Ensure interfaces are satisfied at compile time.
+var (
+	_ ResourceView = (*CloudBuildView)(nil)
+	_ KeyHandler   = (*CloudBuildView)(nil)
+	_ HintProvider = (*CloudBuildView)(nil)
+)
 
 // NewCloudBuildView creates a CloudBuildView for the given project.
 func NewCloudBuildView(a *App, project string) *CloudBuildView {
@@ -47,6 +52,39 @@ func (v *CloudBuildView) RenderLoading() {
 // SetFilter implements Filterable.
 func (v *CloudBuildView) SetFilter(f string) {
 	v.ResourceTable.SetFilter(f)
+}
+
+// Hints implements HintProvider.
+func (v *CloudBuildView) Hints() []Hint {
+	return []Hint{
+		{Key: "r", Desc: "Run"},
+	}
+}
+
+// HandleKey implements KeyHandler.
+func (v *CloudBuildView) HandleKey(event *tcell.EventKey) bool {
+	if event.Rune() == 'r' {
+		return v.openRunOverlay()
+	}
+	return false
+}
+
+// openRunOverlay pushes a RunOverlay for the selected trigger.
+func (v *CloudBuildView) openRunOverlay() bool {
+	row := v.SelectedRow()
+	if row == nil {
+		return true
+	}
+	triggerName := row.Columns[0].Text
+	project := row.Meta["project"]
+	triggerID := row.Meta["triggerId"]
+	branch := row.Meta["branch"]
+	if triggerID == "" {
+		return true
+	}
+	overlay := NewRunOverlay(v.app, triggerName, project, triggerID, branch)
+	v.app.PushOverlay(overlay)
+	return true
 }
 
 // TableDataChanged implements model.TableListener.
