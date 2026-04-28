@@ -15,6 +15,7 @@ var (
 	cfgFile  string
 	logLevel string
 	project  string
+	logFile  *os.File
 )
 
 var rootCmd = &cobra.Command{
@@ -28,6 +29,12 @@ resources. Similar to k9s but for GCP.`,
 		if err != nil {
 			log.Error().Err(err).Msg("failed to load config")
 			return err
+		}
+		// Redirect os.Stderr to the log file so that any third-party
+		// library (gRPC, oauth2, etc.) writing directly to stderr does
+		// not corrupt the tview screen.
+		if logFile != nil {
+			os.Stderr = logFile
 		}
 		app := ui.New(cfg)
 		return app.Run()
@@ -78,5 +85,35 @@ func initLogger() {
 		level = zerolog.InfoLevel
 	}
 	zerolog.SetGlobalLevel(level)
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	// The TUI owns stdout/stderr — writing log lines there corrupts the
+	// tview screen. Send all logs to a file under the user cache dir.
+	logFile = openLogFile()
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: logFile, NoColor: true})
+}
+
+// openLogFile returns a writable log file under the user cache dir, falling
+// back to /dev/null on any error so that logging never interferes with the TUI.
+func openLogFile() *os.File {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return discardFile()
+	}
+	dir := cacheDir + "/g9s"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return discardFile()
+	}
+	f, err := os.OpenFile(dir+"/g9s.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return discardFile()
+	}
+	return f
+}
+
+func discardFile() *os.File {
+	f, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return nil
+	}
+	return f
 }

@@ -78,13 +78,18 @@ func (v *BuildHistoryView) SetFilter(f string) {
 func (v *BuildHistoryView) Hints() []Hint {
 	return []Hint{
 		{Key: "l", Desc: "View logs"},
+		{Key: "C", Desc: "Cancel build"},
 		{Key: "PgDn", Desc: "Next page"},
 	}
 }
 
 // HandleKey implements KeyHandler.
 // 'l' opens the log viewer for the selected build.
+// 'C' cancels the selected in-progress build.
 func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
+	if event.Rune() == 'C' {
+		return v.cancelSelected()
+	}
 	if event.Rune() != 'l' {
 		return false
 	}
@@ -133,6 +138,63 @@ func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
 		v.app.tview.QueueUpdateDraw(func() {
 			v.openLogs(buildID, resolvedBucket, status, project, resolvedMode, resolvedCreate)
 		})
+	}()
+	return true
+}
+
+// cancelSelected sends a CancelBuild request for the currently selected build
+// and immediately updates the in-memory row status to "<status> (Cancelling...)"
+// so the user gets visual feedback before the next poll tick refreshes the row.
+func (v *BuildHistoryView) cancelSelected() bool {
+	row := v.SelectedRow()
+	if row == nil {
+		return true
+	}
+	buildID := row.Meta["buildId"]
+	project := row.Meta["project"]
+	status := row.Meta["status"]
+	if buildID == "" {
+		return true
+	}
+
+	// Only allow cancelling builds that are in a non-terminal state.
+	switch status {
+	case "Working", "Queued", "Pending":
+	default:
+		log.Debug().Str("buildId", buildID).Str("status", status).
+			Msg("build history: cancel ignored — build not in a cancellable state")
+		return true
+	}
+
+	// Optimistic UI update: mutate the matching row and the live cell so the
+	// user sees immediate feedback. The next poll tick will replace the row
+	// with the real "Cancelled" status from the API.
+	const statusCol = 2 // ID, TRIGGER, STATUS
+	cancellingText := status + " (Cancelling...)"
+	for i := range v.allRows {
+		if v.allRows[i].Meta["buildId"] == buildID {
+			if statusCol < len(v.allRows[i].Columns) {
+				v.allRows[i].Columns[statusCol].Text = cancellingText
+			}
+			break
+		}
+	}
+	for i, r := range v.rowIndex {
+		if r.Meta["buildId"] == buildID {
+			cell := v.Table.GetCell(i+1, statusCol)
+			if cell != nil {
+				cell.SetText(" " + cancellingText + " ")
+			}
+			break
+		}
+	}
+
+	go func() {
+		if err := dao.CancelBuild(v.app.ctx, project, buildID); err != nil {
+			log.Error().Err(err).Str("buildId", buildID).Msg("build history: cancel failed")
+			return
+		}
+		log.Info().Str("buildId", buildID).Msg("build history: cancel requested")
 	}()
 	return true
 }

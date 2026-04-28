@@ -14,6 +14,28 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+// CancelBuild cancels an in-progress build by project and build ID.
+func CancelBuild(ctx context.Context, project, buildID string) error {
+	opts, err := gcp.ClientOptions(ctx)
+	if err != nil {
+		return fmt.Errorf("buildhistory: credentials: %w", err)
+	}
+	client, err := cloudbuild.NewClient(ctx, opts...)
+	if err != nil {
+		return fmt.Errorf("buildhistory: new client: %w", err)
+	}
+	defer client.Close()
+
+	_, err = client.CancelBuild(ctx, &cloudbuildpb.CancelBuildRequest{
+		ProjectId: project,
+		Id:        buildID,
+	})
+	if err != nil {
+		return fmt.Errorf("buildhistory: cancel: %w", err)
+	}
+	return nil
+}
+
 // GetBuild fetches a single build by project and build ID.
 // Returns the build proto with the most up-to-date fields, including
 // LogsBucket which may be empty on very early-stage builds.
