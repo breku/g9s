@@ -22,6 +22,7 @@ var Registry = map[string]ResourceMeta{
 	"cloudbuild":   {DAO: new(dao.CloudBuild), TTL: 30 * time.Second},
 	"buildhistory": {DAO: new(dao.BuildHistory), TTL: 5 * time.Second},
 	"vms":          {DAO: new(dao.VMs), TTL: 30 * time.Second},
+	"secrets":      {DAO: new(dao.Secrets), TTL: 60 * time.Second},
 }
 
 // Aliases maps shorthand command names to canonical registry keys.
@@ -33,6 +34,9 @@ var Aliases = map[string]string{
 	"vms":          "vms",
 	"vm":           "vms",
 	"instances":    "vms",
+	"secrets":      "secrets",
+	"secret":       "secrets",
+	"sm":           "secrets",
 	"q":            "_quit",
 	"quit":         "_quit",
 }

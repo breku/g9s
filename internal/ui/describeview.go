@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
@@ -22,6 +23,14 @@ type DescribeView struct {
 	title   string
 	fetch   func(ctx context.Context) (string, error)
 	onClose func()
+
+	// content holds the last successfully fetched payload, used by the
+	// 'c' copy binding so it doesn't have to refetch.
+	content string
+
+	// copyHint is the label shown in the hint bar for the 'c' binding.
+	// Defaults to "Copy" in NewDescribeView; override via EnableCopy.
+	copyHint string
 }
 
 // NewDescribeView creates a DescribeView.
@@ -43,6 +52,7 @@ func NewDescribeView(a *App, title string, fetch func(ctx context.Context) (stri
 		app:      a,
 		title:    title,
 		fetch:    fetch,
+		copyHint: "Copy",
 	}
 
 	tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -50,10 +60,35 @@ func NewDescribeView(a *App, title string, fetch func(ctx context.Context) (stri
 			dv.close()
 			return nil
 		}
+		if event.Rune() == 'c' {
+			dv.copyContent()
+			return nil
+		}
 		return event
 	})
 
 	return dv
+}
+
+// EnableCopy overrides the default "Copy" label shown next to the 'c' hint.
+// Copy itself is always enabled; this only changes the wording (e.g.
+// "Copy value" for secrets, "Copy YAML" for describe overlays).
+func (dv *DescribeView) EnableCopy(hintLabel string) {
+	if hintLabel == "" {
+		return
+	}
+	dv.copyHint = hintLabel
+}
+
+// copyContent writes the last fetched payload to the system clipboard.
+// No-op while the fetch is still in flight (content is empty).
+func (dv *DescribeView) copyContent() {
+	if dv.content == "" {
+		return
+	}
+	if err := clipboard.WriteAll(dv.content); err != nil {
+		log.Error().Err(err).Str("title", dv.title).Msg("describe: copy to clipboard failed")
+	}
 }
 
 // Primitive implements Overlay.
@@ -71,6 +106,7 @@ func (dv *DescribeView) OnClose(fn func()) { dv.onClose = fn }
 func (dv *DescribeView) Hints() []Hint {
 	return []Hint{
 		{Key: "q/Esc", Desc: "Close"},
+		{Key: "c", Desc: dv.copyHint},
 	}
 }
 
@@ -86,6 +122,7 @@ func (dv *DescribeView) Start(ctx context.Context) {
 		return
 	}
 	dv.app.tview.QueueUpdateDraw(func() {
+		dv.content = content
 		dv.TextView.SetText(content)
 		dv.TextView.ScrollToBeginning()
 	})
