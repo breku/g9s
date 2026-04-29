@@ -79,6 +79,8 @@ func newResourceView(a *App, resource, project string) ResourceView {
 		return NewCloudBuildView(a, project)
 	case "buildhistory":
 		return NewBuildHistoryView(a, project)
+	case "vms":
+		return NewVMsView(a, project)
 	default:
 		return nil
 	}
