@@ -46,6 +46,9 @@ func (v *VMsView) Primitive() tview.Primitive { return v.Table }
 // Watch implements ResourceView.
 func (v *VMsView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
 
+// Stop implements ResourceView.
+func (v *VMsView) Stop() { v.mdl.Stop() }
+
 // DAO implements ResourceView.
 func (v *VMsView) DAO() dao.Accessor { return v.dao }
 

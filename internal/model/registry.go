@@ -13,20 +13,16 @@ import (
 )
 
 // Registry maps resource identifiers to their ResourceMeta.
-// TTL rationale per resource type:
-//   - cloudrun: services are long-lived and change infrequently; 60 s is a
-//     good balance between freshness and API quota consumption.
 //
-// When adding new resource types, choose a TTL based on:
-//   - How often the resource changes in practice.
-//   - The cost/quota weight of the List API call.
-//   - User expectation of how "live" the data should feel.
+// RefreshRate is the polling interval used while a view is active. Choose
+// based on how often the resource changes in practice and the cost of the
+// List API call.
 var Registry = map[string]ResourceMeta{
-	"cloudrun":     {DAO: new(cloudrun.CloudRun), TTL: 30 * time.Second},
-	"cloudbuild":   {DAO: new(cloudbuild.CloudBuild), TTL: 30 * time.Second},
-	"buildhistory": {DAO: new(buildhistory.BuildHistory), TTL: 5 * time.Second},
-	"vms":          {DAO: new(vms.VMs), TTL: 30 * time.Second},
-	"secrets":      {DAO: new(secrets.Secrets), TTL: 60 * time.Second},
+	"cloudrun":     {DAO: new(cloudrun.CloudRun), RefreshRate: 30 * time.Second},
+	"cloudbuild":   {DAO: new(cloudbuild.CloudBuild), RefreshRate: 30 * time.Second},
+	"buildhistory": {DAO: new(buildhistory.BuildHistory), RefreshRate: 5 * time.Second},
+	"vms":          {DAO: new(vms.VMs), RefreshRate: 30 * time.Second},
+	"secrets":      {DAO: new(secrets.Secrets), RefreshRate: 60 * time.Second},
 }
 
 // Aliases maps shorthand command names to canonical registry keys.

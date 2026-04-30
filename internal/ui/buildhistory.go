@@ -65,6 +65,9 @@ func (v *BuildHistoryView) Primitive() tview.Primitive { return v.Table }
 // Watch implements ResourceView.
 func (v *BuildHistoryView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
 
+// Stop implements ResourceView.
+func (v *BuildHistoryView) Stop() { v.mdl.Stop() }
+
 // DAO implements ResourceView.
 func (v *BuildHistoryView) DAO() dao.Accessor { return v.dao }
 

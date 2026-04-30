@@ -20,11 +20,14 @@ type TableListener interface {
 	TableLoadFailed(err error)
 }
 
-// ResourceMeta binds a resource identifier to its DAO and cache TTL.
-// TTL controls how long a fetched result is considered fresh before the next
-// real GCP API call is made. The polling interval in model.Table governs how
-// often the cache is checked; the TTL governs when the cache is bypassed.
+// ResourceMeta binds a resource identifier to its DAO and background
+// refresh rate.
+//
+// RefreshRate is the interval between background fetches while a view is
+// active (i.e. between the user opening the view and switching away from
+// it). Choose it based on how often the resource changes in practice and
+// the cost of the List call.
 type ResourceMeta struct {
-	DAO dao.Accessor
-	TTL time.Duration
+	DAO         dao.Accessor
+	RefreshRate time.Duration
 }

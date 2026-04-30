@@ -5,47 +5,43 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brekol/g9s/internal/cache"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/rs/zerolog/log"
 )
 
-const defaultRefreshRate = 30 * time.Second
-
-// shared is the process-wide cache instance. All Table models share it so
-// that switching between views of the same resource serves the cached copy
-// instantly rather than issuing a duplicate API call.
-var shared = cache.New()
-
 // Table is the universal polling model for any GCP resource that can be
-// displayed as a table. On each tick it checks the shared TTL cache first;
-// only on a cache miss (or expiry) does it call the DAO and hit the GCP API.
+// displayed as a table.
 //
-// All TableListener callbacks are invoked from the background goroutine; views
+// Each view owns its Table and drives its lifecycle:
+//   - Watch fetches once synchronously, then ticks at the resource's
+//     RefreshRate, calling the DAO directly each time.
+//   - Stop cancels the polling goroutine. The App calls this when the user
+//     navigates away so background fetches don't accumulate.
+//   - Watch is re-entrant: a second call cancels the previous polling
+//     goroutine and starts a new one bound to the new ctx. This lets the
+//     App resume polling on switch-back with a fresh context.
+//
+// There is no cache: switching back to a view always re-fetches. The
+// trade-off is a brief "Loading…" frame on every switch-back in exchange
+// for guaranteed-fresh data and zero cache-coherence machinery.
+//
+// All TableListener callbacks are invoked from a background goroutine; views
 // must dispatch tview mutations via app.QueueUpdateDraw.
 type Table struct {
-	resource    string
-	project     string
-	refreshRate time.Duration
+	resource string
+	project  string
 
-	mu        sync.RWMutex
+	mu        sync.Mutex
 	listeners []TableListener
+	cancel    context.CancelFunc // cancels the active polling goroutine; nil when stopped
 }
 
 // NewTable creates a Table model for the given resource and project.
 func NewTable(resource, project string) *Table {
 	return &Table{
-		resource:    resource,
-		project:     project,
-		refreshRate: defaultRefreshRate,
+		resource: resource,
+		project:  project,
 	}
-}
-
-// SetRefreshRate overrides the polling interval.
-func (t *Table) SetRefreshRate(d time.Duration) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.refreshRate = d
 }
 
 // AddListener registers a TableListener to receive model events.
@@ -55,23 +51,49 @@ func (t *Table) AddListener(l TableListener) {
 	t.listeners = append(t.listeners, l)
 }
 
-// Watch performs an immediate refresh and then polls on the refresh interval
-// until ctx is cancelled. The first call serves from cache if the entry is
-// still fresh, so the UI can paint instantly when revisiting a view.
-// Returns an error only if the initial fetch fails with no cached fallback.
+// Watch performs an immediate refresh and then polls on the resource's
+// configured RefreshRate until the derived context is cancelled.
+//
+// Re-entrant: if a previous Watch is still running, it is cancelled first.
+// Returns an error only if the initial fetch fails; subsequent tick failures
+// are delivered to listeners via TableLoadFailed.
 func (t *Table) Watch(ctx context.Context) error {
-	if err := t.refresh(ctx); err != nil {
+	meta, ok := Lookup(t.resource)
+	if !ok {
+		return nil
+	}
+
+	t.mu.Lock()
+	if t.cancel != nil {
+		t.cancel()
+	}
+	subCtx, cancel := context.WithCancel(ctx)
+	t.cancel = cancel
+	t.mu.Unlock()
+
+	if err := t.refresh(subCtx, meta); err != nil {
 		t.fireLoadFailed(err)
 		return err
 	}
-	go t.updater(ctx)
+	go t.updater(subCtx, meta)
 	return nil
 }
 
-// updater runs the polling loop in a background goroutine.
-func (t *Table) updater(ctx context.Context) {
-	rate := t.rate()
-	ticker := time.NewTicker(rate)
+// Stop cancels the active polling goroutine, if any. Safe to call multiple
+// times. After Stop, Watch may be called again to resume polling.
+func (t *Table) Stop() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.cancel != nil {
+		t.cancel()
+		t.cancel = nil
+	}
+}
+
+// updater runs the polling loop in a background goroutine, ticking at the
+// resource's RefreshRate. Exits cleanly when ctx is cancelled.
+func (t *Table) updater(ctx context.Context, meta ResourceMeta) {
+	ticker := time.NewTicker(meta.RefreshRate)
 	defer ticker.Stop()
 
 	for {
@@ -79,65 +101,42 @@ func (t *Table) updater(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := t.refresh(ctx); err != nil {
+			if err := t.refresh(ctx, meta); err != nil {
 				t.fireLoadFailed(err)
 			}
 		}
 	}
 }
 
-// refresh serves from the TTL cache when the entry is still fresh, and calls
-// the DAO only on a cache miss or expiry.
-func (t *Table) refresh(ctx context.Context) error {
-	meta, ok := Lookup(t.resource)
-	if !ok {
-		return nil
-	}
-
-	// Cache hit — serve immediately without touching the GCP API.
-	if data, hit := shared.Get(t.resource, t.project); hit {
-		log.Debug().
-			Str("resource", t.resource).
-			Str("project", t.project).
-			Msg("cache hit")
-		t.fireDataChanged(data)
-		return nil
-	}
-
-	// Cache miss — call the DAO.
+// refresh calls the DAO and notifies listeners on success.
+func (t *Table) refresh(ctx context.Context, meta ResourceMeta) error {
 	log.Debug().
 		Str("resource", t.resource).
 		Str("project", t.project).
-		Msg("cache miss — fetching from API")
+		Msg("fetching from API")
 
 	data, err := meta.DAO.List(ctx, t.project)
 	if err != nil {
 		return err
 	}
-
-	shared.Set(t.resource, t.project, data, meta.TTL)
 	t.fireDataChanged(data)
 	return nil
 }
 
-func (t *Table) rate() time.Duration {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.refreshRate
-}
-
 func (t *Table) fireDataChanged(data *dao.TableData) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	for _, l := range t.listeners {
+	t.mu.Lock()
+	listeners := append([]TableListener(nil), t.listeners...)
+	t.mu.Unlock()
+	for _, l := range listeners {
 		l.TableDataChanged(data)
 	}
 }
 
 func (t *Table) fireLoadFailed(err error) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	for _, l := range t.listeners {
+	t.mu.Lock()
+	listeners := append([]TableListener(nil), t.listeners...)
+	t.mu.Unlock()
+	for _, l := range listeners {
 		l.TableLoadFailed(err)
 	}
 }

@@ -45,6 +45,9 @@ func (v *CloudBuildView) Primitive() tview.Primitive { return v.Table }
 // Watch implements ResourceView.
 func (v *CloudBuildView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
 
+// Stop implements ResourceView.
+func (v *CloudBuildView) Stop() { v.mdl.Stop() }
+
 // DAO implements ResourceView.
 func (v *CloudBuildView) DAO() dao.Accessor { return v.dao }
 

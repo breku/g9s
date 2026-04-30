@@ -45,8 +45,16 @@ type ResourceView interface {
 
 	// Primitive returns the tview primitive to mount in the pages layout.
 	Primitive() tview.Primitive
-	// Watch starts the background polling loop. Blocks until ctx is cancelled.
+	// Watch starts the background polling loop. Re-entrant: a second call
+	// cancels the previous loop and replaces it with one driven by ctx.
+	// Returns when the initial fetch completes (or fails); polling
+	// continues in a background goroutine until ctx is cancelled or Stop
+	// is called.
 	Watch(ctx context.Context) error
+	// Stop cancels the active polling goroutine. Called by the App when
+	// the user navigates away so background work doesn't accumulate.
+	// Safe to call multiple times; safe to call before Watch.
+	Stop()
 	// RenderLoading shows a placeholder while the first fetch is in flight.
 	RenderLoading()
 	// DAO returns the underlying data-access object so generic key handlers

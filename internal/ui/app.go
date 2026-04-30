@@ -248,7 +248,13 @@ func (a *App) PopOverlay() {
 }
 
 // showResource navigates to the view for the given resource key, creating it
-// on first call. Called on the main goroutine — must not block.
+// on first call. Stops the previously active view's polling so background
+// fetches don't accumulate as the user moves between resources, and
+// (re)starts the new view's polling — re-entrant Watch handles the
+// hand-off. Switch-back triggers a fresh fetch and a brief "Loading…"
+// frame; the page itself (selection, scroll position) is preserved.
+//
+// Called on the main goroutine — must not block.
 func (a *App) showResource(resource string) {
 	a.showHeader()
 
@@ -258,15 +264,33 @@ func (a *App) showResource(resource string) {
 			SetText("\n  [red]No GCP project set.[white] Use --project flag or G9S_PROJECT env var.").
 			SetDynamicColors(true)
 		a.pages.AddAndSwitchToPage(resource, tv, true)
+		if a.activeView != nil {
+			a.activeView.Stop()
+		}
 		a.activeView = nil
 		a.header.SetViewHints(nil)
 		return
+	}
+
+	// Stop the previous view's poller before switching. The page is kept in
+	// the pages cache so the table state (selection, scroll) is preserved;
+	// only the background fetch loop is paused.
+	if a.activeView != nil {
+		a.activeView.Stop()
 	}
 
 	if a.pages.HasPage(resource) {
 		a.pages.SwitchToPage(resource)
 		a.activeView = a.viewCache[resource]
 		a.header.SetViewHints(viewHintProvider(a.activeView))
+		// Resume polling with a fresh ctx; the cache will serve the last
+		// known data instantly while a background revalidate runs if the
+		// entry is stale.
+		go func() {
+			if err := a.activeView.Watch(a.ctx); err != nil {
+				log.Error().Err(err).Str("resource", resource).Msg("resume watch failed")
+			}
+		}()
 		return
 	}
 

@@ -44,6 +44,9 @@ func (v *SecretsView) Primitive() tview.Primitive { return v.Table }
 // Watch implements ResourceView.
 func (v *SecretsView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
 
+// Stop implements ResourceView.
+func (v *SecretsView) Stop() { v.mdl.Stop() }
+
 // DAO implements ResourceView.
 func (v *SecretsView) DAO() dao.Accessor { return v.dao }
 
