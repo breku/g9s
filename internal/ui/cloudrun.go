@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/atotto/clipboard"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/dao/cloudrun"
 	"github.com/brekol/g9s/internal/model"
@@ -23,6 +22,7 @@ type CloudRunView struct {
 	app     *App
 	project string
 	mdl     *model.Table
+	dao     *cloudrun.CloudRun
 }
 
 // Ensure interfaces are satisfied at compile time.
@@ -39,6 +39,7 @@ func NewCloudRunView(a *App, project string) *CloudRunView {
 		app:           a,
 		project:       project,
 		mdl:           model.NewTable("cloudrun", project),
+		dao:           new(cloudrun.CloudRun),
 	}
 	v.mdl.AddListener(v)
 	return v
@@ -49,6 +50,9 @@ func (v *CloudRunView) Primitive() tview.Primitive { return v.Table }
 
 // Watch implements ResourceView.
 func (v *CloudRunView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
+
+// DAO implements ResourceView.
+func (v *CloudRunView) DAO() dao.Accessor { return v.dao }
 
 // RenderLoading implements ResourceView.
 func (v *CloudRunView) RenderLoading() {
@@ -62,30 +66,22 @@ func (v *CloudRunView) SetFilter(f string) {
 	v.ResourceTable.SetFilter(f)
 }
 
-// Hints implements HintProvider.
+// Hints implements HintProvider. Returns only resource-specific bindings;
+// generic d/y/c are advertised by the global dispatcher.
 func (v *CloudRunView) Hints() []Hint {
 	return []Hint{
-		{Key: "d", Desc: "Describe"},
-		{Key: "y", Desc: "YAML"},
 		{Key: "e", Desc: "Edit"},
 		{Key: "l", Desc: "Logs"},
-		{Key: "c", Desc: "Copy URL"},
 	}
 }
 
 // HandleKey implements KeyHandler.
 func (v *CloudRunView) HandleKey(event *tcell.EventKey) bool {
 	switch event.Rune() {
-	case 'd':
-		return v.openDescribe(false)
-	case 'y':
-		return v.openDescribe(true)
 	case 'e':
 		return v.editService()
 	case 'l':
 		return v.openLogs()
-	case 'c':
-		return v.copyURL()
 	}
 	return false
 }
@@ -102,7 +98,7 @@ func (v *CloudRunView) editService() bool {
 	short := lastSegmentUI(name)
 
 	// Fetch current YAML before suspending so any error is visible in the TUI.
-	yamlStr, err := cloudrun.DescribeYAML(v.app.ctx, name)
+	yamlStr, err := v.dao.DescribeYAML(v.app.ctx, name)
 	if err != nil {
 		log.Error().Err(err).Str("service", name).Msg("cloudrun: fetch for edit failed")
 		v.showEditError(short, err)
@@ -112,7 +108,7 @@ func (v *CloudRunView) editService() bool {
 	// Run the editor + API call inside Suspend so tcell releases the terminal.
 	var editErr error
 	ok := v.app.tview.Suspend(func() {
-		editErr = runEditorAndUpdate(v.app.ctx, short, yamlStr)
+		editErr = runEditorAndUpdate(v.app.ctx, v.dao, short, yamlStr)
 	})
 	if !ok {
 		log.Warn().Msg("cloudrun: tview.Suspend returned false (already suspended)")
@@ -141,7 +137,7 @@ func (v *CloudRunView) showEditError(shortName string, err error) {
 // runEditorAndUpdate writes the YAML to a temp file, opens $EDITOR on it,
 // and on clean exit applies the resulting YAML via the Cloud Run API.
 // If the file is unchanged, the API call is skipped.
-func runEditorAndUpdate(ctx context.Context, shortName, original string) error {
+func runEditorAndUpdate(ctx context.Context, d *cloudrun.CloudRun, shortName, original string) error {
 	tmp, err := os.CreateTemp("", "g9s-cloudrun-"+shortName+"-*.yaml")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -179,53 +175,7 @@ func runEditorAndUpdate(ctx context.Context, shortName, original string) error {
 		return nil
 	}
 
-	return cloudrun.UpdateServiceFromYAML(ctx, string(edited))
-}
-
-// copyURL copies the selected service's URL to the system clipboard.
-func (v *CloudRunView) copyURL() bool {
-	row := v.SelectedRow()
-	if row == nil {
-		return true
-	}
-	url, ok := row.CopyColumnValue()
-	if !ok {
-		return true
-	}
-	if err := clipboard.WriteAll(url); err != nil {
-		log.Error().Err(err).Str("url", url).Msg("cloudrun: copy URL failed")
-	}
-	return true
-}
-
-// openDescribe pushes a DescribeView overlay for the selected service.
-// yaml=true renders YAML format; yaml=false renders human-readable JSON.
-func (v *CloudRunView) openDescribe(asYAML bool) bool {
-	row := v.SelectedRow()
-	if row == nil {
-		return true
-	}
-	name := row.GetID()
-	format := "Describe"
-	if asYAML {
-		format = "YAML"
-	}
-	title := fmt.Sprintf("%s – %s", format, lastSegmentUI(name))
-
-	var fetchFn func(ctx context.Context) (string, error)
-	if asYAML {
-		fetchFn = func(ctx context.Context) (string, error) {
-			return cloudrun.DescribeYAML(ctx, name)
-		}
-	} else {
-		fetchFn = func(ctx context.Context) (string, error) {
-			return cloudrun.DescribeText(ctx, name)
-		}
-	}
-
-	dv := NewDescribeView(v.app, title, fetchFn)
-	v.app.PushOverlay(dv)
-	return true
+	return d.UpdateServiceFromYAML(ctx, string(edited))
 }
 
 // openLogs pushes a LogView overlay streaming all Cloud Run logs for the selected service.

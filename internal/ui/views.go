@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 
+	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -48,6 +49,10 @@ type ResourceView interface {
 	Watch(ctx context.Context) error
 	// RenderLoading shows a placeholder while the first fetch is in flight.
 	RenderLoading()
+	// DAO returns the underlying data-access object so generic key handlers
+	// (e.g. describe, copy) can dispatch via capability assertions without
+	// knowing the concrete view type.
+	DAO() dao.Accessor
 }
 
 // Overlay is implemented by full-screen panels that sit on top of the current

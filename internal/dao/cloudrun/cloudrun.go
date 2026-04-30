@@ -18,8 +18,10 @@ import (
 
 // Ensure CloudRun satisfies Accessor and ServiceRow satisfies Row at compile time.
 var (
-	_ dao.Accessor = (*CloudRun)(nil)
-	_ dao.Row      = (*ServiceRow)(nil)
+	_ dao.Accessor      = (*CloudRun)(nil)
+	_ dao.TextDescriber = (*CloudRun)(nil)
+	_ dao.YAMLDescriber = (*CloudRun)(nil)
+	_ dao.Row           = (*ServiceRow)(nil)
 )
 
 // CloudRun is the DAO for Cloud Run v2 Services.
@@ -172,10 +174,10 @@ func getService(ctx context.Context, name string) (*runpb.Service, error) {
 	return client.GetService(ctx, &runpb.GetServiceRequest{Name: name})
 }
 
-// DescribeText returns a human-readable JSON description of a Cloud Run service,
-// equivalent to: gcloud run services describe <name>
-func DescribeText(ctx context.Context, name string) (string, error) {
-	svc, err := getService(ctx, name)
+// DescribeText implements dao.TextDescriber. Returns a JSON description of a
+// Cloud Run service, equivalent to: gcloud run services describe <name>
+func (c *CloudRun) DescribeText(ctx context.Context, id string) (string, error) {
+	svc, err := getService(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -186,10 +188,10 @@ func DescribeText(ctx context.Context, name string) (string, error) {
 	return string(b), nil
 }
 
-// DescribeYAML returns a YAML description of a Cloud Run service,
-// equivalent to: gcloud run services describe <name> --format=yaml
-func DescribeYAML(ctx context.Context, name string) (string, error) {
-	svc, err := getService(ctx, name)
+// DescribeYAML implements dao.YAMLDescriber. Returns the YAML rendering of a
+// Cloud Run service, equivalent to: gcloud run services describe <name> --format=yaml
+func (c *CloudRun) DescribeYAML(ctx context.Context, id string) (string, error) {
+	svc, err := getService(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -215,7 +217,7 @@ func DescribeYAML(ctx context.Context, name string) (string, error) {
 // Returns as soon as the UpdateService request is accepted — it does NOT
 // wait for the long-running deploy to finish. Callers that need the final
 // outcome should observe the next poll tick.
-func UpdateServiceFromYAML(ctx context.Context, yamlStr string) error {
+func (c *CloudRun) UpdateServiceFromYAML(ctx context.Context, yamlStr string) error {
 	var m interface{}
 	if err := yaml.Unmarshal([]byte(yamlStr), &m); err != nil {
 		return fmt.Errorf("cloudrun: parse yaml: %w", err)

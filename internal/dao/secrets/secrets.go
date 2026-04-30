@@ -136,7 +136,7 @@ func rowFromSecret(s *secretmanagerpb.Secret) *SecretRow {
 
 // AccessLatestSecret fetches the plaintext payload of the latest enabled
 // version of the given secret.
-func AccessLatestSecret(ctx context.Context, secretName string) (string, error) {
+func (s *Secrets) AccessLatestSecret(ctx context.Context, secretName string) (string, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return "", fmt.Errorf("secrets: credentials: %w", err)

@@ -17,6 +17,7 @@ type SecretsView struct {
 
 	app *App
 	mdl *model.Table
+	dao *secrets.Secrets
 }
 
 var (
@@ -31,6 +32,7 @@ func NewSecretsView(a *App, project string) *SecretsView {
 		ResourceTable: NewResourceTable("Secrets"),
 		app:           a,
 		mdl:           model.NewTable("secrets", project),
+		dao:           new(secrets.Secrets),
 	}
 	v.mdl.AddListener(v)
 	return v
@@ -41,6 +43,9 @@ func (v *SecretsView) Primitive() tview.Primitive { return v.Table }
 
 // Watch implements ResourceView.
 func (v *SecretsView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
+
+// DAO implements ResourceView.
+func (v *SecretsView) DAO() dao.Accessor { return v.dao }
 
 // RenderLoading implements ResourceView.
 func (v *SecretsView) RenderLoading() {
@@ -83,7 +88,7 @@ func (v *SecretsView) viewSecret() bool {
 	title := fmt.Sprintf("Secret – %s", short)
 
 	dv := NewDescribeView(v.app, title, func(ctx context.Context) (string, error) {
-		return secrets.AccessLatestSecret(ctx, name)
+		return v.dao.AccessLatestSecret(ctx, name)
 	})
 	dv.EnableCopy("Copy value")
 	v.app.PushOverlay(dv)

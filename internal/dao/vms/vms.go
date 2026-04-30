@@ -17,8 +17,10 @@ import (
 
 // Ensure VMs satisfies Accessor and InstanceRow satisfies Row at compile time.
 var (
-	_ dao.Accessor = (*VMs)(nil)
-	_ dao.Row      = (*InstanceRow)(nil)
+	_ dao.Accessor      = (*VMs)(nil)
+	_ dao.TextDescriber = (*VMs)(nil)
+	_ dao.YAMLDescriber = (*VMs)(nil)
+	_ dao.Row           = (*InstanceRow)(nil)
 )
 
 // VMs is the DAO for Compute Engine VM instances.
@@ -133,9 +135,12 @@ func rowFromInstance(inst *computepb.Instance) *InstanceRow {
 	}
 
 	return &InstanceRow{
-		id:         inst.GetSelfLink(),
-		rowType:    colType,
-		Project:    projectFromSelfLink(inst.GetSelfLink()),
+		id:      inst.GetSelfLink(),
+		rowType: colType,
+		Project: func() string {
+			p, _, _ := parseSelfLink(inst.GetSelfLink())
+			return p
+		}(),
 		Zone:       zone,
 		Name:       name,
 		NumericID:  fmt.Sprintf("%d", inst.GetId()),
@@ -151,18 +156,6 @@ func rowFromInstance(inst *computepb.Instance) *InstanceRow {
 			{Text: created},
 		},
 	}
-}
-
-// projectFromSelfLink extracts the project ID from a Compute self-link.
-// Format: .../projects/<project>/zones/<zone>/instances/<name>
-func projectFromSelfLink(self string) string {
-	parts := strings.Split(self, "/")
-	for i, p := range parts {
-		if p == "projects" && i+1 < len(parts) {
-			return parts[i+1]
-		}
-	}
-	return ""
 }
 
 func instanceIPs(inst *computepb.Instance) (internal, external string) {
@@ -209,8 +202,12 @@ func getInstance(ctx context.Context, project, zone, name string) (*computepb.In
 	})
 }
 
-// DescribeVMText returns a human-readable JSON description of a VM instance.
-func DescribeVMText(ctx context.Context, project, zone, name string) (string, error) {
+// DescribeText implements dao.TextDescriber. id is the instance self-link.
+func (v *VMs) DescribeText(ctx context.Context, id string) (string, error) {
+	project, zone, name := parseSelfLink(id)
+	if project == "" || zone == "" || name == "" {
+		return "", fmt.Errorf("vms: cannot parse self-link: %q", id)
+	}
 	inst, err := getInstance(ctx, project, zone, name)
 	if err != nil {
 		return "", err
@@ -222,8 +219,12 @@ func DescribeVMText(ctx context.Context, project, zone, name string) (string, er
 	return string(b), nil
 }
 
-// DescribeVMYAML returns a YAML description of a VM instance.
-func DescribeVMYAML(ctx context.Context, project, zone, name string) (string, error) {
+// DescribeYAML implements dao.YAMLDescriber. id is the instance self-link.
+func (v *VMs) DescribeYAML(ctx context.Context, id string) (string, error) {
+	project, zone, name := parseSelfLink(id)
+	if project == "" || zone == "" || name == "" {
+		return "", fmt.Errorf("vms: cannot parse self-link: %q", id)
+	}
 	inst, err := getInstance(ctx, project, zone, name)
 	if err != nil {
 		return "", err
@@ -243,9 +244,9 @@ func DescribeVMYAML(ctx context.Context, project, zone, name string) (string, er
 	return string(yamlBytes), nil
 }
 
-// DeleteVM issues a delete on the given Compute Engine instance.
+// Delete issues a delete on the given Compute Engine instance.
 // Returns as soon as the API accepts the request — does NOT wait for the LRO.
-func DeleteVM(ctx context.Context, project, zone, name string) error {
+func (v *VMs) Delete(ctx context.Context, project, zone, name string) error {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return fmt.Errorf("vms: credentials: %w", err)
@@ -265,4 +266,27 @@ func DeleteVM(ctx context.Context, project, zone, name string) error {
 	}
 	go func() { _ = client.Close() }()
 	return nil
+}
+
+// parseSelfLink extracts (project, zone, name) from a Compute self-link.
+// Format: .../projects/<project>/zones/<zone>/instances/<name>
+func parseSelfLink(self string) (project, zone, name string) {
+	parts := strings.Split(self, "/")
+	for i, p := range parts {
+		switch p {
+		case "projects":
+			if i+1 < len(parts) {
+				project = parts[i+1]
+			}
+		case "zones":
+			if i+1 < len(parts) {
+				zone = parts[i+1]
+			}
+		case "instances":
+			if i+1 < len(parts) {
+				name = parts[i+1]
+			}
+		}
+	}
+	return
 }

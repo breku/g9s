@@ -17,6 +17,7 @@ type CloudBuildView struct {
 
 	app *App
 	mdl *model.Table
+	dao *cloudbuild.CloudBuild
 }
 
 // Ensure interfaces are satisfied at compile time.
@@ -32,6 +33,7 @@ func NewCloudBuildView(a *App, project string) *CloudBuildView {
 		ResourceTable: NewResourceTable("Cloud Build"),
 		app:           a,
 		mdl:           model.NewTable("cloudbuild", project),
+		dao:           new(cloudbuild.CloudBuild),
 	}
 	v.mdl.AddListener(v)
 	return v
@@ -42,6 +44,9 @@ func (v *CloudBuildView) Primitive() tview.Primitive { return v.Table }
 
 // Watch implements ResourceView.
 func (v *CloudBuildView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
+
+// DAO implements ResourceView.
+func (v *CloudBuildView) DAO() dao.Accessor { return v.dao }
 
 // RenderLoading implements ResourceView.
 func (v *CloudBuildView) RenderLoading() {
@@ -80,7 +85,7 @@ func (v *CloudBuildView) openRunOverlay() bool {
 	if !ok || tr.TriggerID == "" {
 		return true
 	}
-	overlay := NewRunOverlay(v.app, tr.Name, tr.Project, tr.TriggerID, tr.Branch)
+	overlay := NewRunOverlay(v.app, v.dao, tr.Name, tr.Project, tr.TriggerID, tr.Branch)
 	v.app.PushOverlay(overlay)
 	return true
 }

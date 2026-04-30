@@ -176,7 +176,7 @@ func projectFromResourceName(name string) string {
 }
 
 // RunTrigger triggers a Cloud Build run for the given trigger ID and branch.
-func RunTrigger(ctx context.Context, project, triggerID, branch string) error {
+func (c *CloudBuild) RunTrigger(ctx context.Context, project, triggerID, branch string) error {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return fmt.Errorf("cloudbuild: credentials: %w", err)

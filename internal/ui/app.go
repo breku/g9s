@@ -98,6 +98,14 @@ func New(cfg *config.Config) *App {
 			a.stop()
 			return nil
 		}
+		// Generic cross-resource keys (d, y, c) handled centrally so each
+		// view doesn't reimplement them. Runs before the view's own
+		// KeyHandler so views can't accidentally shadow them.
+		if a.activeOverlay == nil && a.activeView != nil {
+			if handleGenericKey(a, a.activeView, event) {
+				return nil
+			}
+		}
 		// Forward to the active view's KeyHandler if it implements one.
 		if a.activeView != nil {
 			if kh, ok := a.activeView.(KeyHandler); ok {
@@ -236,11 +244,7 @@ func (a *App) PopOverlay() {
 	a.pages.RemovePage(overlayPage)
 	a.tview.SetFocus(a.pages)
 	a.tview.EnableMouse(true)
-	if hp, ok := a.activeView.(HintProvider); ok {
-		a.header.SetViewHints(hp)
-	} else {
-		a.header.SetViewHints(nil)
-	}
+	a.header.SetViewHints(viewHintProvider(a.activeView))
 }
 
 // showResource navigates to the view for the given resource key, creating it
@@ -262,11 +266,7 @@ func (a *App) showResource(resource string) {
 	if a.pages.HasPage(resource) {
 		a.pages.SwitchToPage(resource)
 		a.activeView = a.viewCache[resource]
-		if hp, ok := a.activeView.(HintProvider); ok {
-			a.header.SetViewHints(hp)
-		} else {
-			a.header.SetViewHints(nil)
-		}
+		a.header.SetViewHints(viewHintProvider(a.activeView))
 		return
 	}
 
@@ -281,11 +281,7 @@ func (a *App) showResource(resource string) {
 
 	view.RenderLoading()
 	a.pages.AddAndSwitchToPage(resource, view.Primitive(), true)
-	if hp, ok := view.(HintProvider); ok {
-		a.header.SetViewHints(hp)
-	} else {
-		a.header.SetViewHints(nil)
-	}
+	a.header.SetViewHints(viewHintProvider(view))
 
 	go func() {
 		if err := view.Watch(a.ctx); err != nil {

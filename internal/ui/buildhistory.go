@@ -21,6 +21,7 @@ type BuildHistoryView struct {
 	app     *App
 	mdl     *model.Table
 	project string
+	dao     *buildhistory.BuildHistory
 
 	// accumulated state — updated on every TableDataChanged + every page load.
 	allRows       []dao.Row
@@ -42,6 +43,7 @@ func NewBuildHistoryView(a *App, project string) *BuildHistoryView {
 		app:           a,
 		project:       project,
 		mdl:           model.NewTable("buildhistory", project),
+		dao:           new(buildhistory.BuildHistory),
 	}
 	v.mdl.AddListener(v)
 
@@ -62,6 +64,9 @@ func (v *BuildHistoryView) Primitive() tview.Primitive { return v.Table }
 
 // Watch implements ResourceView.
 func (v *BuildHistoryView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
+
+// DAO implements ResourceView.
+func (v *BuildHistoryView) DAO() dao.Accessor { return v.dao }
 
 // RenderLoading implements ResourceView.
 func (v *BuildHistoryView) RenderLoading() {
@@ -116,7 +121,7 @@ func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
 
 	// Bucket not populated yet — call GetBuild to resolve it.
 	go func() {
-		b, err := buildhistory.GetBuild(v.app.ctx, br.Project, br.BuildID)
+		b, err := v.dao.GetBuild(v.app.ctx, br.Project, br.BuildID)
 		if err != nil {
 			log.Error().Err(err).Str("buildId", br.BuildID).Msg("build history: GetBuild failed")
 			return
@@ -177,7 +182,7 @@ func (v *BuildHistoryView) cancelSelected() bool {
 	}
 
 	go func() {
-		if err := buildhistory.CancelBuild(v.app.ctx, br.Project, br.BuildID); err != nil {
+		if err := v.dao.CancelBuild(v.app.ctx, br.Project, br.BuildID); err != nil {
 			log.Error().Err(err).Str("buildId", br.BuildID).Msg("build history: cancel failed")
 			return
 		}
@@ -222,8 +227,7 @@ func (v *BuildHistoryView) maybeLoadNextPage() {
 	project := v.project
 
 	go func() {
-		bh := new(buildhistory.BuildHistory)
-		data, err := bh.NextPage(v.app.ctx, project, token, 10)
+		data, err := v.dao.NextPage(v.app.ctx, project, token, 10)
 		if err != nil {
 			log.Error().Err(err).Msg("build history: next page failed")
 			v.app.tview.QueueUpdateDraw(func() { v.loading = false })

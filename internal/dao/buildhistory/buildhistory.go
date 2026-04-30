@@ -17,7 +17,7 @@ import (
 )
 
 // CancelBuild cancels an in-progress build by project and build ID.
-func CancelBuild(ctx context.Context, project, buildID string) error {
+func (b *BuildHistory) CancelBuild(ctx context.Context, project, buildID string) error {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return fmt.Errorf("buildhistory: credentials: %w", err)
@@ -39,7 +39,7 @@ func CancelBuild(ctx context.Context, project, buildID string) error {
 }
 
 // GetBuild fetches a single build by project and build ID.
-func GetBuild(ctx context.Context, project, buildID string) (*cloudbuildpb.Build, error) {
+func (b *BuildHistory) GetBuild(ctx context.Context, project, buildID string) (*cloudbuildpb.Build, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildhistory: credentials: %w", err)

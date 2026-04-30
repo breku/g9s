@@ -24,6 +24,7 @@ type RunOverlay struct {
 	modal *tview.Grid
 
 	app         *App
+	dao         *cloudbuild.CloudBuild
 	project     string
 	triggerID   string
 	triggerName string
@@ -34,9 +35,10 @@ type RunOverlay struct {
 }
 
 // NewRunOverlay creates a RunOverlay for the given trigger, pre-filled with branch.
-func NewRunOverlay(a *App, triggerName, project, triggerID, branch string) *RunOverlay {
+func NewRunOverlay(a *App, d *cloudbuild.CloudBuild, triggerName, project, triggerID, branch string) *RunOverlay {
 	ro := &RunOverlay{
 		app:         a,
+		dao:         d,
 		project:     project,
 		triggerID:   triggerID,
 		triggerName: triggerName,
@@ -148,7 +150,7 @@ func (ro *RunOverlay) submit() {
 	ro.input.SetDisabled(true)
 
 	go func() {
-		err := cloudbuild.RunTrigger(ro.app.ctx, ro.project, ro.triggerID, branch)
+		err := ro.dao.RunTrigger(ro.app.ctx, ro.project, ro.triggerID, branch)
 		if err != nil {
 			log.Error().Err(err).Str("trigger", ro.triggerID).Msg("run overlay: trigger failed")
 			ro.app.tview.QueueUpdateDraw(func() {

@@ -18,6 +18,7 @@ type VMsView struct {
 
 	app *App
 	mdl *model.Table
+	dao *vms.VMs
 }
 
 // Ensure interfaces are satisfied at compile time.
@@ -33,6 +34,7 @@ func NewVMsView(a *App, project string) *VMsView {
 		ResourceTable: NewResourceTable("VMs"),
 		app:           a,
 		mdl:           model.NewTable("vms", project),
+		dao:           new(vms.VMs),
 	}
 	v.mdl.AddListener(v)
 	return v
@@ -43,6 +45,9 @@ func (v *VMsView) Primitive() tview.Primitive { return v.Table }
 
 // Watch implements ResourceView.
 func (v *VMsView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
+
+// DAO implements ResourceView.
+func (v *VMsView) DAO() dao.Accessor { return v.dao }
 
 // RenderLoading implements ResourceView.
 func (v *VMsView) RenderLoading() {
@@ -56,11 +61,10 @@ func (v *VMsView) SetFilter(f string) {
 	v.ResourceTable.SetFilter(f)
 }
 
-// Hints implements HintProvider.
+// Hints implements HintProvider. Only resource-specific bindings; generic
+// d/y/c are advertised by the global dispatcher.
 func (v *VMsView) Hints() []Hint {
 	return []Hint{
-		{Key: "d", Desc: "Describe"},
-		{Key: "y", Desc: "YAML"},
 		{Key: "l", Desc: "Logs"},
 		{Key: "Ctrl-D", Desc: "Delete"},
 	}
@@ -71,18 +75,13 @@ func (v *VMsView) HandleKey(event *tcell.EventKey) bool {
 	if event.Key() == tcell.KeyCtrlD {
 		return v.confirmDelete()
 	}
-	switch event.Rune() {
-	case 'd':
-		return v.openDescribe(false)
-	case 'y':
-		return v.openDescribe(true)
-	case 'l':
+	if event.Rune() == 'l' {
 		return v.openLogs()
 	}
 	return false
 }
 
-// confirmDelete pushes a ConfirmOverlay; on 'y' it calls vms.DeleteVM.
+// confirmDelete pushes a ConfirmOverlay; on 'y' it calls VMs.Delete.
 func (v *VMsView) confirmDelete() bool {
 	row := v.SelectedRow()
 	if row == nil {
@@ -96,65 +95,10 @@ func (v *VMsView) confirmDelete() bool {
 	prompt := fmt.Sprintf("Delete instance [yellow]%s[white] in zone [yellow]%s[white]?", ir.Name, ir.Zone)
 	title := fmt.Sprintf("VM – %s", ir.Name)
 	co := NewConfirmOverlay(v.app, title, prompt, func(ctx context.Context) error {
-		return vms.DeleteVM(ctx, ir.Project, ir.Zone, ir.Name)
+		return v.dao.Delete(ctx, ir.Project, ir.Zone, ir.Name)
 	})
 	v.app.PushOverlay(co)
 	return true
-}
-
-// openDescribe pushes a DescribeView overlay for the selected instance.
-// yaml=true renders YAML; otherwise pretty-printed JSON.
-func (v *VMsView) openDescribe(asYAML bool) bool {
-	row := v.SelectedRow()
-	if row == nil {
-		return true
-	}
-	ir, ok := row.(*vms.InstanceRow)
-	if !ok || ir.Project == "" || ir.Zone == "" || ir.Name == "" {
-		return true
-	}
-
-	format := "Describe"
-	if asYAML {
-		format = "YAML"
-	}
-	title := fmt.Sprintf("%s – %s", format, ir.Name)
-
-	var fetchFn func(ctx context.Context) (string, error)
-	if asYAML {
-		fetchFn = func(ctx context.Context) (string, error) {
-			return vms.DescribeVMYAML(ctx, ir.Project, ir.Zone, ir.Name)
-		}
-	} else {
-		fetchFn = func(ctx context.Context) (string, error) {
-			return vms.DescribeVMText(ctx, ir.Project, ir.Zone, ir.Name)
-		}
-	}
-
-	dv := NewDescribeView(v.app, title, fetchFn)
-	v.app.PushOverlay(dv)
-	return true
-}
-
-// TableDataChanged implements model.TableListener.
-func (v *VMsView) TableDataChanged(data *dao.TableData) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.Render(data)
-	})
-}
-
-// TableLoadFailed implements model.TableListener.
-func (v *VMsView) TableLoadFailed(err error) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.renderError(err)
-	})
-}
-
-// renderError clears the table and shows the error message.
-func (v *VMsView) renderError(err error) {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
-		SetSelectable(false))
 }
 
 // openLogs pushes a LogView overlay streaming Cloud Logging entries for the
@@ -182,4 +126,25 @@ func (v *VMsView) openLogs() bool {
 	lv := NewLogViewFromConfig(v.app, cfg)
 	v.app.PushOverlay(lv)
 	return true
+}
+
+// TableDataChanged implements model.TableListener.
+func (v *VMsView) TableDataChanged(data *dao.TableData) {
+	v.app.tview.QueueUpdateDraw(func() {
+		v.Render(data)
+	})
+}
+
+// TableLoadFailed implements model.TableListener.
+func (v *VMsView) TableLoadFailed(err error) {
+	v.app.tview.QueueUpdateDraw(func() {
+		v.renderError(err)
+	})
+}
+
+// renderError clears the table and shows the error message.
+func (v *VMsView) renderError(err error) {
+	v.Clear()
+	v.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
+		SetSelectable(false))
 }
