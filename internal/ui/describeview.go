@@ -123,7 +123,7 @@ func (dv *DescribeView) Start(ctx context.Context) {
 	}
 	dv.app.tview.QueueUpdateDraw(func() {
 		dv.content = content
-		dv.TextView.SetText(content)
+		dv.TextView.SetText(highlight(content))
 		dv.TextView.ScrollToBeginning()
 	})
 }
