@@ -103,7 +103,9 @@ func openLogFile() *os.File {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return discardFile()
 	}
-	f, err := os.OpenFile(dir+"/g9s.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// Truncate on startup: g9s.log holds only the current session's logs.
+	// Cross-session history is not useful for post-mortem debugging.
+	f, err := os.OpenFile(dir+"/g9s.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return discardFile()
 	}

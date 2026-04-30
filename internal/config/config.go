@@ -14,7 +14,6 @@ import (
 type Config struct {
 	Project  string `mapstructure:"project"`
 	LogLevel string `mapstructure:"log_level"`
-	Region   string `mapstructure:"region"`
 }
 
 // Load reads config from viper and returns a Config struct.
