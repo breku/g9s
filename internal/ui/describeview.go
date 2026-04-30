@@ -45,7 +45,7 @@ func NewDescribeView(a *App, title string, fetch func(ctx context.Context) (stri
 	tv.SetTitle(fmt.Sprintf(" %s ", title))
 	tv.SetTitleColor(tcell.ColorWhite)
 	tv.SetTitleAlign(tview.AlignCenter)
-	tv.SetBackgroundColor(tcell.ColorDefault)
+	tv.SetBackgroundColor(AppTheme.BackgroundColor)
 
 	dv := &DescribeView{
 		TextView: tv,
