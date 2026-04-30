@@ -211,47 +211,56 @@ func (c *CloudRun) DescribeYAML(ctx context.Context, id string) (string, error) 
 }
 
 // UpdateServiceFromYAML parses the given YAML representation of a Cloud Run
-// service and applies it via the Services API. The service name embedded in
-// the YAML is used to identify the target service.
+// service and submits an UpdateService request. Returns a wait function the
+// caller invokes (typically in a goroutine via app.TrackOp) to block on the
+// long-running deploy and surface its final outcome.
 //
-// Returns as soon as the UpdateService request is accepted — it does NOT
-// wait for the long-running deploy to finish. Callers that need the final
-// outcome should observe the next poll tick.
-func (c *CloudRun) UpdateServiceFromYAML(ctx context.Context, yamlStr string) error {
+// The wait function takes ownership of closing the underlying API client on
+// completion, so the caller MUST invoke it exactly once. Returning the
+// initial submission error and the wait separately lets the UI report a
+// fast "Deploying foo… (running)" the moment the request is accepted, then
+// flip to "Deploy succeeded" / "Deploy failed: <err>" minutes later when
+// the LRO finishes.
+//
+// The service name embedded in the YAML identifies the target service.
+func (c *CloudRun) UpdateServiceFromYAML(ctx context.Context, yamlStr string) (wait func(context.Context) error, err error) {
 	var m interface{}
 	if err := yaml.Unmarshal([]byte(yamlStr), &m); err != nil {
-		return fmt.Errorf("cloudrun: parse yaml: %w", err)
+		return nil, fmt.Errorf("cloudrun: parse yaml: %w", err)
 	}
 	jsonBytes, err := json.Marshal(m)
 	if err != nil {
-		return fmt.Errorf("cloudrun: marshal json: %w", err)
+		return nil, fmt.Errorf("cloudrun: marshal json: %w", err)
 	}
 	svc := &runpb.Service{}
 	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(jsonBytes, svc); err != nil {
-		return fmt.Errorf("cloudrun: unmarshal proto: %w", err)
+		return nil, fmt.Errorf("cloudrun: unmarshal proto: %w", err)
 	}
 	if svc.Name == "" {
-		return fmt.Errorf("cloudrun: service name missing from yaml")
+		return nil, fmt.Errorf("cloudrun: service name missing from yaml")
 	}
 
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
-		return fmt.Errorf("cloudrun: credentials: %w", err)
+		return nil, fmt.Errorf("cloudrun: credentials: %w", err)
 	}
 	client, err := run.NewServicesClient(ctx, opts...)
 	if err != nil {
-		return fmt.Errorf("cloudrun: new client: %w", err)
+		return nil, fmt.Errorf("cloudrun: new client: %w", err)
 	}
 
-	_, err = client.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc})
+	op, err := client.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc})
 	if err != nil {
 		_ = client.Close()
-		return fmt.Errorf("cloudrun: update: %w", err)
+		return nil, fmt.Errorf("cloudrun: update: %w", err)
 	}
-	// Don't wait for the LRO — Cloud Run deploys can take minutes. Polling
-	// loop will reflect new state on next tick. Close client in goroutine.
-	go func() {
-		_ = client.Close()
-	}()
-	return nil
+
+	wait = func(waitCtx context.Context) error {
+		defer client.Close()
+		if _, err := op.Wait(waitCtx); err != nil {
+			return fmt.Errorf("cloudrun: deploy: %w", err)
+		}
+		return nil
+	}
+	return wait, nil
 }

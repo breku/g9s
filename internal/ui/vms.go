@@ -84,7 +84,9 @@ func (v *VMsView) HandleKey(event *tcell.EventKey) bool {
 	return false
 }
 
-// confirmDelete pushes a ConfirmOverlay; on 'y' it calls VMs.Delete.
+// confirmDelete pushes a ConfirmOverlay; on Enter it dispatches the delete
+// via app.TrackOp so the user sees "Delete foo… (running)" / "succeeded" /
+// "failed: …" on the status bar even after switching away from this view.
 func (v *VMsView) confirmDelete() bool {
 	row := v.SelectedRow()
 	if row == nil {
@@ -97,8 +99,11 @@ func (v *VMsView) confirmDelete() bool {
 
 	prompt := fmt.Sprintf("Delete instance [yellow]%s[white] in zone [yellow]%s[white]?", ir.Name, ir.Zone)
 	title := fmt.Sprintf("VM – %s", ir.Name)
-	co := NewConfirmOverlay(v.app, title, prompt, func(ctx context.Context) error {
-		return v.dao.Delete(ctx, ir.Project, ir.Zone, ir.Name)
+	project, zone, name := ir.Project, ir.Zone, ir.Name
+	co := NewConfirmOverlay(v.app, title, prompt, func() {
+		v.app.TrackOp("Delete VM "+name, func(ctx context.Context) error {
+			return v.dao.Delete(ctx, project, zone, name)
+		})
 	})
 	v.app.PushOverlay(co)
 	return true

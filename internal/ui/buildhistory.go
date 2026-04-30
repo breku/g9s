@@ -146,9 +146,11 @@ func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
 	return true
 }
 
-// cancelSelected sends a CancelBuild request for the currently selected build
-// and immediately updates the in-memory row status to "<status> (Cancelling...)"
-// so the user gets visual feedback before the next poll tick refreshes the row.
+// cancelSelected dispatches a CancelBuild via app.TrackOp so the outcome
+// surfaces on the status bar even if the user switches away. The in-memory
+// row is also flipped to "<status> (Cancelling...)" optimistically so the
+// table reflects the user's intent before the next poll tick lands the
+// authoritative status from the API.
 func (v *BuildHistoryView) cancelSelected() bool {
 	row := v.SelectedRow()
 	if row == nil {
@@ -163,8 +165,7 @@ func (v *BuildHistoryView) cancelSelected() bool {
 	switch br.Status {
 	case "Working", "Queued", "Pending":
 	default:
-		log.Debug().Str("buildId", br.BuildID).Str("status", br.Status).
-			Msg("build history: cancel ignored — build not in a cancellable state")
+		v.app.Status(StatusInfo, fmt.Sprintf("Build %s is %s — nothing to cancel", br.BuildID, br.Status))
 		return true
 	}
 
@@ -184,13 +185,10 @@ func (v *BuildHistoryView) cancelSelected() bool {
 		}
 	}
 
-	go func() {
-		if err := v.dao.CancelBuild(v.app.ctx, br.Project, br.BuildID); err != nil {
-			log.Error().Err(err).Str("buildId", br.BuildID).Msg("build history: cancel failed")
-			return
-		}
-		log.Info().Str("buildId", br.BuildID).Msg("build history: cancel requested")
-	}()
+	project, buildID := br.Project, br.BuildID
+	v.app.TrackOp("Cancel build "+buildID, func(ctx context.Context) error {
+		return v.dao.CancelBuild(ctx, project, buildID)
+	})
 	return true
 }
 

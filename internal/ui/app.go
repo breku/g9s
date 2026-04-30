@@ -18,6 +18,7 @@ type App struct {
 	root        *tview.Flex
 	header      *Header
 	cmdbar      *CmdBar
+	statusbar   *StatusBar
 	cmdbarShown bool
 	cfg         *config.Config
 	ctx         context.Context
@@ -58,6 +59,7 @@ func New(cfg *config.Config) *App {
 		cancel:    cancel,
 		viewCache: make(map[string]ResourceView),
 	}
+	a.statusbar = NewStatusBar(a)
 
 	// Wire cmdbar callbacks — all called on the main goroutine by tview.
 	cmdbar.OnCommand(a.handleCommand)
@@ -66,13 +68,12 @@ func New(cfg *config.Config) *App {
 
 	pages.AddPage("home", NewWelcomeView(), true, true)
 
-	// Header is omitted on the welcome screen and added when first resource loads.
-	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(pages, 0, 1, true)
+	// Root layout is built fresh by relayout() on every visibility change so
+	// the row order is always: header? cmdbar? pages statusbar.
+	a.root = tview.NewFlex().SetDirection(tview.FlexRow)
+	a.relayout()
 
-	a.root = root
-
-	tv.SetRoot(root, true).EnableMouse(true)
+	tv.SetRoot(a.root, true).EnableMouse(true)
 
 	tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		// Let the cmdbar consume all input when it is shown.
@@ -120,16 +121,71 @@ func New(cfg *config.Config) *App {
 	return a
 }
 
+// relayout rebuilds the root flex from scratch in canonical row order:
+//
+//	[header (5)]  [cmdbar (3)]  pages (flex)  statusbar (1)
+//
+// Header and cmdbar are conditional. Calling relayout after toggling
+// a.headerShown / a.cmdbarShown is the single source of truth for what's
+// on screen, so individual show/hide methods don't have to coordinate
+// row ordering. Must be called on the tview main goroutine.
+func (a *App) relayout() {
+	a.root.Clear()
+	if a.headerShown {
+		a.root.AddItem(a.header, 5, 0, false)
+	}
+	if a.cmdbarShown {
+		a.root.AddItem(a.cmdbar, 3, 0, false)
+	}
+	a.root.AddItem(a.pages, 0, 1, true)
+	a.root.AddItem(a.statusbar, statusBarHeight, 0, false)
+}
+
+// Status posts a message to the app-wide status bar at the given level.
+// Safe to call from any goroutine. The full message is also written to the
+// log file at the matching zerolog level so long messages remain reviewable.
+func (a *App) Status(level StatusLevel, msg string) {
+	a.statusbar.Set(level, msg)
+}
+
+// runOnUI schedules fn to run on the tview main goroutine. Always dispatches
+// asynchronously via a helper goroutine + QueueUpdateDraw so it is safe to
+// call both from the main goroutine (where a synchronous QueueUpdateDraw
+// would deadlock — the loop can't drain its own queue while the caller
+// blocks it) and from background goroutines.
+func (a *App) runOnUI(fn func()) {
+	go a.tview.QueueUpdateDraw(fn)
+}
+
+// TrackOp runs fn on the App context (NOT a view context, so the operation
+// outlives view switches), reporting progress to the status bar:
+//
+//   - On start: "<name>… (running)" at Info level.
+//   - On success: "<name> succeeded" at Success level.
+//   - On error: "<name> failed: <err>" at Error level (sticky on the bar;
+//     full error in the log file).
+//
+// Returns immediately; fn runs in a goroutine. Use this for any user-initiated
+// action whose outcome the user cares about (deploy, delete, cancel, trigger).
+func (a *App) TrackOp(name string, fn func(ctx context.Context) error) {
+	a.Status(StatusInfo, name+"… (running)")
+	go func() {
+		if err := fn(a.ctx); err != nil {
+			a.Status(StatusError, name+" failed: "+err.Error())
+			return
+		}
+		a.Status(StatusSuccess, name+" succeeded")
+	}()
+}
+
 // showHeader inserts the header into the root layout above pages.
 // No-op if already shown. Must be called on the tview main goroutine.
 func (a *App) showHeader() {
 	if a.headerShown {
 		return
 	}
-	a.root.RemoveItem(a.pages)
-	a.root.AddItem(a.header, 5, 0, false)
-	a.root.AddItem(a.pages, 0, 1, true)
 	a.headerShown = true
+	a.relayout()
 }
 
 // hideHeader removes the header from the root layout.
@@ -138,8 +194,8 @@ func (a *App) hideHeader() {
 	if !a.headerShown {
 		return
 	}
-	a.root.RemoveItem(a.header)
 	a.headerShown = false
+	a.relayout()
 }
 
 // Run starts the blocking event loop.
@@ -153,8 +209,8 @@ func (a *App) stop() {
 	a.tview.Stop()
 }
 
-// showCmdBar inserts the command bar into the layout at row 1 (below the
-// header), sets its mode, and focuses it. Safe to call if already shown.
+// showCmdBar inserts the command bar into the layout, sets its mode, and
+// focuses it. Safe to call if already shown.
 func (a *App) showCmdBar(mode cmdMode) {
 	if mode == modeCommand {
 		a.cmdbar.ActivateCommand()
@@ -162,12 +218,8 @@ func (a *App) showCmdBar(mode cmdMode) {
 		a.cmdbar.ActivateFilter()
 	}
 	if !a.cmdbarShown {
-		// Insert between header (index 0) and pages (index 1).
-		// RemoveItem+re-add pages so the cmdbar sits at index 1.
-		a.root.RemoveItem(a.pages)
-		a.root.AddItem(a.cmdbar, 3, 0, false)
-		a.root.AddItem(a.pages, 0, 1, false)
 		a.cmdbarShown = true
+		a.relayout()
 	}
 	a.tview.SetFocus(a.cmdbar.InputField)
 }
@@ -184,8 +236,8 @@ func (a *App) hideCmdBar() {
 	// the blur chain comes up empty, and the cursor stays painted from
 	// the cmdbar's last draw.
 	a.tview.SetFocus(a.pages)
-	a.root.RemoveItem(a.cmdbar)
 	a.cmdbarShown = false
+	a.relayout()
 }
 
 // handleCommand is called when the user submits a ':' command.

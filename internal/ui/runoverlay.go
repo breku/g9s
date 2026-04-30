@@ -7,7 +7,6 @@ import (
 	"github.com/brekol/g9s/internal/dao/cloudbuild"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/rs/zerolog/log"
 )
 
 // Ensure RunOverlay satisfies Overlay and HintProvider at compile time.
@@ -17,7 +16,9 @@ var (
 )
 
 // RunOverlay is a small modal overlay that lets the user confirm (and optionally
-// edit) the branch before triggering a Cloud Build run.
+// edit) the branch before triggering a Cloud Build run. On submit the overlay
+// closes immediately and the trigger call is dispatched via app.TrackOp so the
+// outcome surfaces on the global status bar even if the user navigates away.
 type RunOverlay struct {
 	// modal is the root primitive passed to tview.Pages — a full-screen Grid
 	// that centres the dialog box.
@@ -30,7 +31,6 @@ type RunOverlay struct {
 	triggerName string
 
 	input   *tview.InputField
-	status  *tview.TextView
 	onClose func()
 }
 
@@ -54,14 +54,6 @@ func NewRunOverlay(a *App, d *cloudbuild.CloudBuild, triggerName, project, trigg
 		SetLabelColor(tcell.ColorYellow)
 	ro.input = input
 
-	// Status line (shows "Running…" / error after submission).
-	status := tview.NewTextView().
-		SetDynamicColors(true).
-		SetText("")
-	status.SetBackgroundColor(AppTheme.BackgroundColor)
-	ro.status = status
-
-	// Layout: label + input on one row, status below, hint at bottom.
 	hint := tview.NewTextView().
 		SetDynamicColors(true).
 		SetText(" [yellow]Enter[white] Run  [yellow]Esc[white] Cancel")
@@ -70,8 +62,6 @@ func NewRunOverlay(a *App, d *cloudbuild.CloudBuild, triggerName, project, trigg
 	inner := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tview.NewBox().SetBackgroundColor(AppTheme.BackgroundColor), 1, 0, false).
 		AddItem(input, 1, 0, true).
-		AddItem(tview.NewBox().SetBackgroundColor(AppTheme.BackgroundColor), 1, 0, false).
-		AddItem(status, 1, 0, false).
 		AddItem(tview.NewBox().SetBackgroundColor(AppTheme.BackgroundColor), 0, 1, false).
 		AddItem(hint, 1, 0, false)
 	inner.SetBackgroundColor(AppTheme.BackgroundColor)
@@ -86,10 +76,10 @@ func NewRunOverlay(a *App, d *cloudbuild.CloudBuild, triggerName, project, trigg
 	outer.SetTitleAlign(tview.AlignCenter)
 	outer.SetBackgroundColor(AppTheme.BackgroundColor)
 
-	// Centre the dialog in a full-screen transparent grid (60 wide, 9 tall).
+	// Centre the dialog in a full-screen transparent grid (60 wide, 7 tall).
 	grid := tview.NewGrid().
 		SetColumns(0, 60, 0).
-		SetRows(0, 9, 0).
+		SetRows(0, 7, 0).
 		AddItem(outer, 1, 1, 1, 1, 0, 0, true)
 	grid.SetBackgroundColor(tcell.ColorDefault)
 
@@ -136,35 +126,23 @@ func (ro *RunOverlay) Hints() []Hint {
 // no-op — the user drives everything via key presses.
 func (ro *RunOverlay) Start(_ context.Context) {}
 
-// submit reads the branch, calls cloudbuild.RunTrigger, and shows the result.
-// Called from the InputField's DoneFunc — already on the main tview goroutine.
+// submit reads the branch, closes the overlay, and dispatches the trigger via
+// app.TrackOp. Called from the InputField's DoneFunc — already on the main
+// tview goroutine.
 func (ro *RunOverlay) submit() {
 	branch := ro.input.GetText()
 	if branch == "" {
-		ro.status.SetText("[red]Branch must not be empty.")
+		ro.app.Status(StatusWarning, "Branch must not be empty.")
 		return
 	}
 
-	// Update UI directly — we're already on the main goroutine.
-	ro.status.SetText(" [yellow]Triggering build…")
-	ro.input.SetDisabled(true)
+	project, triggerID, triggerName := ro.project, ro.triggerID, ro.triggerName
+	dao := ro.dao
+	ro.close()
 
-	go func() {
-		err := ro.dao.RunTrigger(ro.app.ctx, ro.project, ro.triggerID, branch)
-		if err != nil {
-			log.Error().Err(err).Str("trigger", ro.triggerID).Msg("run overlay: trigger failed")
-			ro.app.tview.QueueUpdateDraw(func() {
-				ro.status.SetText(fmt.Sprintf("[red]Error: %v", err))
-				ro.input.SetDisabled(false)
-			})
-			return
-		}
-		ro.app.tview.QueueUpdateDraw(func() {
-			ro.status.SetText(fmt.Sprintf("[green]Build triggered on branch '%s'.", branch))
-			// Auto-close after success so the user sees it.
-			ro.onClose()
-		})
-	}()
+	ro.app.TrackOp(fmt.Sprintf("Trigger build %s (%s)", triggerName, branch), func(ctx context.Context) error {
+		return dao.RunTrigger(ctx, project, triggerID, branch)
+	})
 }
 
 // close calls the registered onClose callback.

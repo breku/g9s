@@ -2,11 +2,9 @@ package ui
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/rs/zerolog/log"
 )
 
 // Ensure ConfirmOverlay satisfies Overlay and HintProvider at compile time.
@@ -16,45 +14,38 @@ var (
 )
 
 // ConfirmOverlay is a small modal that asks the user to confirm a destructive
-// action with y/N. On 'y' it runs the supplied action in a background
-// goroutine; on success the overlay closes itself, on failure it shows the
-// error and lets the user dismiss with Esc/n.
+// action with Enter/Esc.
+//
+// On confirm it closes itself and invokes onConfirm; the caller is then
+// responsible for launching the actual work (typically via app.TrackOp so
+// progress and errors surface on the status bar). This keeps the overlay
+// purely a yes/no prompt and avoids duplicate result-reporting paths.
 type ConfirmOverlay struct {
 	modal *tview.Grid
 
-	app     *App
-	title   string
-	prompt  string
-	action  func(ctx context.Context) error
-	status  *tview.TextView
-	onClose func()
-
-	// running guards against re-entry while the action is in flight.
-	running bool
+	app       *App
+	title     string
+	prompt    string
+	onConfirm func()
+	onClose   func()
 }
 
 // NewConfirmOverlay constructs a confirmation modal.
-//   - title:  shown in the border, e.g. "Delete VM".
-//   - prompt: body text, e.g. "Delete instance my-vm in zone us-central1-a?".
-//   - action: invoked on 'y'; runs on a goroutine off the main tview thread.
-func NewConfirmOverlay(a *App, title, prompt string, action func(ctx context.Context) error) *ConfirmOverlay {
+//   - title:     shown in the border, e.g. "Delete VM".
+//   - prompt:    body text, e.g. "Delete instance my-vm in zone us-central1-a?".
+//   - onConfirm: invoked on Enter, AFTER the overlay has closed.
+func NewConfirmOverlay(a *App, title, prompt string, onConfirm func()) *ConfirmOverlay {
 	co := &ConfirmOverlay{
-		app:    a,
-		title:  title,
-		prompt: prompt,
-		action: action,
+		app:       a,
+		title:     title,
+		prompt:    prompt,
+		onConfirm: onConfirm,
 	}
 
 	body := tview.NewTextView().
 		SetDynamicColors(true).
 		SetText(" " + prompt)
 	body.SetBackgroundColor(AppTheme.BackgroundColor)
-
-	status := tview.NewTextView().
-		SetDynamicColors(true).
-		SetText("")
-	status.SetBackgroundColor(AppTheme.BackgroundColor)
-	co.status = status
 
 	hint := tview.NewTextView().
 		SetDynamicColors(true).
@@ -64,8 +55,6 @@ func NewConfirmOverlay(a *App, title, prompt string, action func(ctx context.Con
 	inner := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tview.NewBox().SetBackgroundColor(AppTheme.BackgroundColor), 1, 0, false).
 		AddItem(body, 1, 0, false).
-		AddItem(tview.NewBox().SetBackgroundColor(AppTheme.BackgroundColor), 1, 0, false).
-		AddItem(status, 1, 0, false).
 		AddItem(tview.NewBox().SetBackgroundColor(AppTheme.BackgroundColor), 0, 1, false).
 		AddItem(hint, 1, 0, false)
 	inner.SetBackgroundColor(AppTheme.BackgroundColor)
@@ -79,22 +68,19 @@ func NewConfirmOverlay(a *App, title, prompt string, action func(ctx context.Con
 	outer.SetTitleAlign(tview.AlignCenter)
 	outer.SetBackgroundColor(AppTheme.BackgroundColor)
 
-	// Centre dialog: 60 wide, 9 tall — same dimensions as RunOverlay.
+	// Centre dialog: 60 wide, 7 tall — slightly shorter than before since
+	// we no longer reserve space for an in-overlay status line.
 	grid := tview.NewGrid().
 		SetColumns(0, 60, 0).
-		SetRows(0, 9, 0).
+		SetRows(0, 7, 0).
 		AddItem(outer, 1, 1, 1, 1, 0, 0, true)
 	grid.SetBackgroundColor(tcell.ColorDefault)
 
 	// Capture keys at the modal level so we don't depend on a focused input.
 	grid.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if co.running {
-			// Block all keys while the action is running.
-			return nil
-		}
 		switch event.Key() {
 		case tcell.KeyEnter:
-			co.submit()
+			co.confirm()
 			return nil
 		case tcell.KeyEscape:
 			co.close()
@@ -132,24 +118,14 @@ func (co *ConfirmOverlay) Hints() []Hint {
 	}
 }
 
-// submit runs the action on a goroutine. We're on the main goroutine here
-// (called from the input capture), so direct mutations of status are safe.
-func (co *ConfirmOverlay) submit() {
-	co.running = true
-	co.status.SetText(" [yellow]Working…")
-
-	go func() {
-		err := co.action(co.app.ctx)
-		co.app.tview.QueueUpdateDraw(func() {
-			if err != nil {
-				log.Error().Err(err).Str("title", co.title).Msg("confirm overlay: action failed")
-				co.status.SetText(fmt.Sprintf("[red]Error: %v", err))
-				co.running = false
-				return
-			}
-			co.close()
-		})
-	}()
+// confirm closes the overlay and invokes the onConfirm callback. The
+// callback is invoked AFTER close so that the caller can immediately push
+// another overlay (e.g. an error) without UI ordering surprises.
+func (co *ConfirmOverlay) confirm() {
+	co.close()
+	if co.onConfirm != nil {
+		co.onConfirm()
+	}
 }
 
 func (co *ConfirmOverlay) close() {

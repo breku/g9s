@@ -7,7 +7,6 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rs/zerolog/log"
 )
 
 // combinedHints implements HintProvider by concatenating multiple Hint slices.
@@ -105,11 +104,14 @@ func handleGenericKey(a *App, view ResourceView, event *tcell.EventKey) bool {
 	case 'c':
 		val, ok := row.CopyColumnValue()
 		if !ok || val == "" {
+			a.Status(StatusInfo, "Nothing to copy")
 			return true
 		}
 		if err := clipboard.WriteAll(val); err != nil {
-			log.Error().Err(err).Str("value", val).Msg("copy to clipboard failed")
+			a.Status(StatusError, "Copy failed: "+err.Error())
+			return true
 		}
+		a.Status(StatusSuccess, "Copied: "+val)
 		return true
 	}
 	return false

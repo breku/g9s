@@ -80,15 +80,19 @@ func (dv *DescribeView) EnableCopy(hintLabel string) {
 	dv.copyHint = hintLabel
 }
 
-// copyContent writes the last fetched payload to the system clipboard.
+// copyContent writes the last fetched payload to the system clipboard and
+// surfaces the outcome on the global status bar.
 // No-op while the fetch is still in flight (content is empty).
 func (dv *DescribeView) copyContent() {
 	if dv.content == "" {
+		dv.app.Status(StatusInfo, "Nothing to copy yet — still loading.")
 		return
 	}
 	if err := clipboard.WriteAll(dv.content); err != nil {
-		log.Error().Err(err).Str("title", dv.title).Msg("describe: copy to clipboard failed")
+		dv.app.Status(StatusError, fmt.Sprintf("Copy failed: %v", err))
+		return
 	}
+	dv.app.Status(StatusSuccess, fmt.Sprintf("%s: copied to clipboard", dv.copyHint))
 }
 
 // Primitive implements Overlay.

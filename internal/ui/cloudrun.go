@@ -12,7 +12,6 @@ import (
 	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/rs/zerolog/log"
 )
 
 // CloudRunView is the tview page for Cloud Run services.
@@ -90,8 +89,14 @@ func (v *CloudRunView) HandleKey(event *tcell.EventKey) bool {
 }
 
 // editService suspends the TUI, opens $EDITOR (default: vim) on the selected
-// service's YAML, and applies the changes when the editor exits cleanly.
-// On API or parse error, an error overlay is pushed when the TUI resumes.
+// service's YAML, and submits the changes when the editor exits cleanly.
+// The submission and the long-running deploy are tracked via app.TrackOp,
+// which surfaces "Deploying foo… (running)" / "Deploy succeeded" /
+// "Deploy failed: <err>" on the status bar — outliving any view switch.
+//
+// On a fast-fail (parse error, no diff, immediate API rejection) the status
+// bar is updated synchronously before the function returns. The full error
+// is always written to the log file regardless of where it surfaces.
 func (v *CloudRunView) editService() bool {
 	row := v.SelectedRow()
 	if row == nil {
@@ -103,57 +108,58 @@ func (v *CloudRunView) editService() bool {
 	// Fetch current YAML before suspending so any error is visible in the TUI.
 	yamlStr, err := v.dao.DescribeYAML(v.app.ctx, name)
 	if err != nil {
-		log.Error().Err(err).Str("service", name).Msg("cloudrun: fetch for edit failed")
-		v.showEditError(short, err)
+		v.app.Status(StatusError, fmt.Sprintf("Fetch %s for edit failed: %v", short, err))
 		return true
 	}
 
-	// Run the editor + API call inside Suspend so tcell releases the terminal.
-	var editErr error
+	// Run the editor inside Suspend so tcell releases the terminal.
+	var editedYAML string
+	var changed bool
 	ok := v.app.tview.Suspend(func() {
-		editErr = runEditorAndUpdate(v.app.ctx, v.dao, short, yamlStr)
+		editedYAML, changed, err = runEditor(short, yamlStr)
 	})
 	if !ok {
-		log.Warn().Msg("cloudrun: tview.Suspend returned false (already suspended)")
+		v.app.Status(StatusError, "tview.Suspend returned false (already suspended)")
 		return true
 	}
-	if editErr != nil {
-		log.Error().Err(editErr).Str("service", name).Msg("cloudrun: edit failed")
-		v.showEditError(short, editErr)
+	if err != nil {
+		v.app.Status(StatusError, fmt.Sprintf("Edit %s failed: %v", short, err))
 		return true
 	}
-	log.Info().Str("service", name).Msg("cloudrun: service updated")
+	if !changed {
+		v.app.Status(StatusInfo, fmt.Sprintf("No changes to %s", short))
+		return true
+	}
+
+	// Submit the request synchronously (so a parse/validation error from
+	// the API surfaces immediately), then track the LRO for the actual
+	// deploy outcome on the App ctx so it survives view switches.
+	wait, err := v.dao.UpdateServiceFromYAML(v.app.ctx, editedYAML)
+	if err != nil {
+		v.app.Status(StatusError, fmt.Sprintf("Deploy %s submit failed: %v", short, err))
+		return true
+	}
+	v.app.TrackOp("Deploy "+short, wait)
 	return true
 }
 
-// showEditError displays the error in a DescribeView overlay so the user can
-// scroll through long messages (e.g. validation errors from the API).
-func (v *CloudRunView) showEditError(shortName string, err error) {
-	msg := err.Error()
-	dv := NewDescribeView(v.app, fmt.Sprintf("Edit failed – %s", shortName),
-		func(context.Context) (string, error) {
-			return "[red]" + msg + "[white]", nil
-		})
-	v.app.PushOverlay(dv)
-}
-
-// runEditorAndUpdate writes the YAML to a temp file, opens $EDITOR on it,
-// and on clean exit applies the resulting YAML via the Cloud Run API.
-// If the file is unchanged, the API call is skipped.
-func runEditorAndUpdate(ctx context.Context, d *cloudrun.CloudRun, shortName, original string) error {
+// runEditor writes the YAML to a temp file, opens $EDITOR on it, and
+// returns the (possibly-changed) contents. The bool reports whether the
+// user actually modified the file. Pure I/O — no API calls.
+func runEditor(shortName, original string) (string, bool, error) {
 	tmp, err := os.CreateTemp("", "g9s-cloudrun-"+shortName+"-*.yaml")
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+		return "", false, fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
 	if _, err := tmp.WriteString(original); err != nil {
 		tmp.Close()
-		return fmt.Errorf("write temp file: %w", err)
+		return "", false, fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
+		return "", false, fmt.Errorf("close temp file: %w", err)
 	}
 
 	editor := os.Getenv("EDITOR")
@@ -166,19 +172,14 @@ func runEditorAndUpdate(ctx context.Context, d *cloudrun.CloudRun, shortName, or
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("editor exited with error: %w", err)
+		return "", false, fmt.Errorf("editor exited with error: %w", err)
 	}
 
 	edited, err := os.ReadFile(tmpPath)
 	if err != nil {
-		return fmt.Errorf("read edited file: %w", err)
+		return "", false, fmt.Errorf("read edited file: %w", err)
 	}
-	if string(edited) == original {
-		// Nothing changed — skip the API call.
-		return nil
-	}
-
-	return d.UpdateServiceFromYAML(ctx, string(edited))
+	return string(edited), string(edited) != original, nil
 }
 
 // openLogs pushes a LogView overlay streaming all Cloud Run logs for the selected service.
