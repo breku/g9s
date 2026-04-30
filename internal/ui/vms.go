@@ -31,7 +31,7 @@ var (
 // NewVMsView creates a VMsView for the given project.
 func NewVMsView(a *App, project string) *VMsView {
 	v := &VMsView{
-		ResourceTable: NewResourceTable("VMs"),
+		ResourceTable: NewResourceTable(a, "VMs"),
 		app:           a,
 		mdl:           model.NewTable("vms", project),
 		dao:           new(vms.VMs),
@@ -136,23 +136,5 @@ func (v *VMsView) openLogs() bool {
 	return true
 }
 
-// TableDataChanged implements model.TableListener.
-func (v *VMsView) TableDataChanged(data *dao.TableData) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.Render(data)
-	})
-}
-
-// TableLoadFailed implements model.TableListener.
-func (v *VMsView) TableLoadFailed(err error) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.renderError(err)
-	})
-}
-
-// renderError clears the table and shows the error message.
-func (v *VMsView) renderError(err error) {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
-		SetSelectable(false))
-}
+// TableDataChanged / TableLoadFailed are inherited from the embedded
+// *ResourceTable, which schedules repaints on the tview main goroutine.

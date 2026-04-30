@@ -12,9 +12,16 @@ import (
 // ResourceTable is a reusable tview.Table wrapper that renders dao.TableData.
 // It stores the last-received data so it can re-render when the filter changes
 // without waiting for the next model poll.
+//
+// ResourceTable also implements model.TableListener so simple resource views
+// can embed it and inherit the standard "render or show error" glue without
+// reimplementing TableDataChanged / TableLoadFailed in every view. Views that
+// need custom behaviour (e.g. accumulating pages) can shadow these methods —
+// Go's method resolution picks the outer type's implementation when present.
 type ResourceTable struct {
 	*tview.Table
 
+	app      *App
 	title    string // resource label shown in the border, e.g. "Cloud Run"
 	lastData *dao.TableData
 	filter   string
@@ -24,8 +31,10 @@ type ResourceTable struct {
 	rowIndex []dao.Row
 }
 
-// NewResourceTable creates a ResourceTable with standard styling.
-func NewResourceTable(title string) *ResourceTable {
+// NewResourceTable creates a ResourceTable with standard styling. The app
+// reference is required so the embedded TableListener methods can dispatch
+// repaints onto the tview main goroutine via QueueUpdateDraw.
+func NewResourceTable(app *App, title string) *ResourceTable {
 	t := tview.NewTable().
 		SetBorders(false).
 		SetSelectable(true, false). // row-selection mode
@@ -37,7 +46,28 @@ func NewResourceTable(title string) *ResourceTable {
 	t.SetTitleColor(AppTheme.TableTitleColor)
 	t.SetTitleAlign(tview.AlignCenter)
 
-	return &ResourceTable{Table: t, title: title}
+	return &ResourceTable{Table: t, app: app, title: title}
+}
+
+// TableDataChanged implements model.TableListener. Schedules a repaint with
+// the new data on the tview main goroutine. Views that need to mutate the
+// data (e.g. accumulate pages) should shadow this method on the outer type.
+func (r *ResourceTable) TableDataChanged(data *dao.TableData) {
+	r.app.runOnUI(func() { r.Render(data) })
+}
+
+// TableLoadFailed implements model.TableListener. Schedules an error render
+// on the tview main goroutine.
+func (r *ResourceTable) TableLoadFailed(err error) {
+	r.app.runOnUI(func() { r.renderError(err) })
+}
+
+// renderError clears the table and shows the error message in the first cell.
+// Must be called on the tview main goroutine.
+func (r *ResourceTable) renderError(err error) {
+	r.Clear()
+	r.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
+		SetSelectable(false))
 }
 
 // Render stores data and repaints the table, applying any active filter.

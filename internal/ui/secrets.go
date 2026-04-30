@@ -29,7 +29,7 @@ var (
 // NewSecretsView creates a SecretsView for the given project.
 func NewSecretsView(a *App, project string) *SecretsView {
 	v := &SecretsView{
-		ResourceTable: NewResourceTable("Secrets"),
+		ResourceTable: NewResourceTable(a, "Secrets"),
 		app:           a,
 		mdl:           model.NewTable("secrets", project),
 		dao:           new(secrets.Secrets),
@@ -98,23 +98,5 @@ func (v *SecretsView) viewSecret() bool {
 	return true
 }
 
-// TableDataChanged implements model.TableListener.
-func (v *SecretsView) TableDataChanged(data *dao.TableData) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.Render(data)
-	})
-}
-
-// TableLoadFailed implements model.TableListener.
-func (v *SecretsView) TableLoadFailed(err error) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.renderError(err)
-	})
-}
-
-// renderError clears the table and shows the error message.
-func (v *SecretsView) renderError(err error) {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
-		SetSelectable(false))
-}
+// TableDataChanged / TableLoadFailed are inherited from the embedded
+// *ResourceTable, which schedules repaints on the tview main goroutine.

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/dao/cloudbuild"
@@ -30,7 +29,7 @@ var (
 // NewCloudBuildView creates a CloudBuildView for the given project.
 func NewCloudBuildView(a *App, project string) *CloudBuildView {
 	v := &CloudBuildView{
-		ResourceTable: NewResourceTable("Cloud Build"),
+		ResourceTable: NewResourceTable(a, "Cloud Build"),
 		app:           a,
 		mdl:           model.NewTable("cloudbuild", project),
 		dao:           new(cloudbuild.CloudBuild),
@@ -93,23 +92,5 @@ func (v *CloudBuildView) openRunOverlay() bool {
 	return true
 }
 
-// TableDataChanged implements model.TableListener.
-func (v *CloudBuildView) TableDataChanged(data *dao.TableData) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.Render(data)
-	})
-}
-
-// TableLoadFailed implements model.TableListener.
-func (v *CloudBuildView) TableLoadFailed(err error) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.renderError(err)
-	})
-}
-
-// renderError clears the table and shows the error message.
-func (v *CloudBuildView) renderError(err error) {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
-		SetSelectable(false))
-}
+// TableDataChanged / TableLoadFailed are inherited from the embedded
+// *ResourceTable, which schedules repaints on the tview main goroutine.

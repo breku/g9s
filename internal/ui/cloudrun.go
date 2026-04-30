@@ -34,7 +34,7 @@ var (
 // NewCloudRunView creates a CloudRunView for the given project.
 func NewCloudRunView(a *App, project string) *CloudRunView {
 	v := &CloudRunView{
-		ResourceTable: NewResourceTable("Cloud Run"),
+		ResourceTable: NewResourceTable(a, "Cloud Run"),
 		app:           a,
 		project:       project,
 		mdl:           model.NewTable("cloudrun", project),
@@ -213,26 +213,8 @@ func (v *CloudRunView) openLogs() bool {
 	return true
 }
 
-// TableDataChanged implements model.TableListener.
-func (v *CloudRunView) TableDataChanged(data *dao.TableData) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.Render(data)
-	})
-}
-
-// TableLoadFailed implements model.TableListener.
-func (v *CloudRunView) TableLoadFailed(err error) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.renderError(err)
-	})
-}
-
-// renderError clears the table and shows the error message.
-func (v *CloudRunView) renderError(err error) {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
-		SetSelectable(false))
-}
+// TableDataChanged / TableLoadFailed are inherited from the embedded
+// *ResourceTable, which schedules repaints on the tview main goroutine.
 
 // lastSegmentUI extracts the last path segment of a resource name for display.
 func lastSegmentUI(name string) string {

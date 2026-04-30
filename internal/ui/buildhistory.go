@@ -39,7 +39,7 @@ var (
 // NewBuildHistoryView creates a BuildHistoryView for the given project.
 func NewBuildHistoryView(a *App, project string) *BuildHistoryView {
 	v := &BuildHistoryView{
-		ResourceTable: NewResourceTable("Build History"),
+		ResourceTable: NewResourceTable(a, "Build History"),
 		app:           a,
 		project:       project,
 		mdl:           model.NewTable("buildhistory", project),
@@ -208,12 +208,7 @@ func (v *BuildHistoryView) TableDataChanged(data *dao.TableData) {
 	})
 }
 
-// TableLoadFailed implements model.TableListener.
-func (v *BuildHistoryView) TableLoadFailed(err error) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.renderError(err)
-	})
-}
+// TableLoadFailed is inherited from the embedded *ResourceTable.
 
 // maybeLoadNextPage fetches the next page in the background and appends rows.
 // No-op if there is no next page or a fetch is already in flight.
@@ -261,9 +256,4 @@ func (v *BuildHistoryView) renderAccumulated(header []string) {
 	}
 }
 
-// renderError clears the table and shows the error message.
-func (v *BuildHistoryView) renderError(err error) {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Error: %v ", err)).
-		SetSelectable(false))
-}
+// renderError is inherited from the embedded *ResourceTable.
