@@ -19,7 +19,6 @@ import (
 // Ensure CloudRun satisfies Accessor and ServiceRow satisfies Row at compile time.
 var (
 	_ dao.Accessor      = (*CloudRun)(nil)
-	_ dao.TextDescriber = (*CloudRun)(nil)
 	_ dao.YAMLDescriber = (*CloudRun)(nil)
 	_ dao.Row           = (*ServiceRow)(nil)
 )
@@ -172,20 +171,6 @@ func getService(ctx context.Context, name string) (*runpb.Service, error) {
 	}
 	defer client.Close()
 	return client.GetService(ctx, &runpb.GetServiceRequest{Name: name})
-}
-
-// DescribeText implements dao.TextDescriber. Returns a JSON description of a
-// Cloud Run service, equivalent to: gcloud run services describe <name>
-func (c *CloudRun) DescribeText(ctx context.Context, id string) (string, error) {
-	svc, err := getService(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	b, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(svc)
-	if err != nil {
-		return "", fmt.Errorf("cloudrun: marshal: %w", err)
-	}
-	return string(b), nil
 }
 
 // DescribeYAML implements dao.YAMLDescriber. Returns the YAML rendering of a

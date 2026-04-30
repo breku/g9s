@@ -18,7 +18,6 @@ import (
 // Ensure VMs satisfies Accessor and InstanceRow satisfies Row at compile time.
 var (
 	_ dao.Accessor      = (*VMs)(nil)
-	_ dao.TextDescriber = (*VMs)(nil)
 	_ dao.YAMLDescriber = (*VMs)(nil)
 	_ dao.Row           = (*InstanceRow)(nil)
 )
@@ -200,23 +199,6 @@ func getInstance(ctx context.Context, project, zone, name string) (*computepb.In
 		Zone:     zone,
 		Instance: name,
 	})
-}
-
-// DescribeText implements dao.TextDescriber. id is the instance self-link.
-func (v *VMs) DescribeText(ctx context.Context, id string) (string, error) {
-	project, zone, name := parseSelfLink(id)
-	if project == "" || zone == "" || name == "" {
-		return "", fmt.Errorf("vms: cannot parse self-link: %q", id)
-	}
-	inst, err := getInstance(ctx, project, zone, name)
-	if err != nil {
-		return "", err
-	}
-	b, err := json.MarshalIndent(inst, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("vms: marshal: %w", err)
-	}
-	return string(b), nil
 }
 
 // DescribeYAML implements dao.YAMLDescriber. id is the instance self-link.

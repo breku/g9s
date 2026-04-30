@@ -43,9 +43,6 @@ func genericHints(view ResourceView) []Hint {
 	}
 	var hints []Hint
 	d := view.DAO()
-	if _, ok := d.(dao.TextDescriber); ok {
-		hints = append(hints, Hint{Key: "d", Desc: "Describe"})
-	}
 	if _, ok := d.(dao.YAMLDescriber); ok {
 		hints = append(hints, Hint{Key: "y", Desc: "YAML"})
 	}
@@ -53,7 +50,7 @@ func genericHints(view ResourceView) []Hint {
 	return hints
 }
 
-// handleGenericKey dispatches the cross-resource keys ('d', 'y', 'c') by
+// handleGenericKey dispatches the cross-resource keys ('y', 'c') by
 // inspecting the active view's DAO capabilities. Returns true when the key
 // was consumed so the caller can short-circuit further handling.
 func handleGenericKey(a *App, view ResourceView, event *tcell.EventKey) bool {
@@ -68,26 +65,13 @@ func handleGenericKey(a *App, view ResourceView, event *tcell.EventKey) bool {
 	if row == nil {
 		// Still consume the key so the resource view doesn't see it.
 		switch event.Rune() {
-		case 'd', 'y', 'c':
+		case 'y', 'c':
 			return true
 		}
 		return false
 	}
 
 	switch event.Rune() {
-	case 'd':
-		td, ok := view.DAO().(dao.TextDescriber)
-		if !ok {
-			return false
-		}
-		id := row.GetID()
-		title := fmt.Sprintf("Describe – %s", lastSegmentUI(id))
-		dv := NewDescribeView(a, title, func(ctx context.Context) (string, error) {
-			return td.DescribeText(ctx, id)
-		})
-		a.PushOverlay(dv)
-		return true
-
 	case 'y':
 		yd, ok := view.DAO().(dao.YAMLDescriber)
 		if !ok {

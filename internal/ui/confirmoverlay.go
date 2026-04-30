@@ -49,7 +49,7 @@ func NewConfirmOverlay(a *App, title, prompt string, onConfirm func()) *ConfirmO
 
 	hint := tview.NewTextView().
 		SetDynamicColors(true).
-		SetText(" [yellow]Enter[white] Confirm  [yellow]Esc[white] Cancel")
+		SetText(" [yellow]Enter/y[white] Confirm  [yellow]Esc[white] Cancel")
 	hint.SetBackgroundColor(AppTheme.BackgroundColor)
 
 	inner := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -87,6 +87,9 @@ func NewConfirmOverlay(a *App, title, prompt string, onConfirm func()) *ConfirmO
 			return nil
 		}
 		switch event.Rune() {
+		case 'y', 'Y':
+			co.confirm()
+			return nil
 		case 'q':
 			co.close()
 			return nil
@@ -113,7 +116,7 @@ func (co *ConfirmOverlay) OnClose(fn func()) { co.onClose = fn }
 // Hints implements HintProvider.
 func (co *ConfirmOverlay) Hints() []Hint {
 	return []Hint{
-		{Key: "Enter", Desc: "Confirm"},
+		{Key: "Enter/y", Desc: "Confirm"},
 		{Key: "Esc", Desc: "Cancel"},
 	}
 }

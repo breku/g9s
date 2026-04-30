@@ -66,12 +66,6 @@ type Accessor interface {
 	List(ctx context.Context, project string) (*TableData, error)
 }
 
-// TextDescriber is an optional capability for DAOs that can render a single
-// resource as a human-readable text/JSON description, addressed by canonical ID.
-type TextDescriber interface {
-	DescribeText(ctx context.Context, id string) (string, error)
-}
-
 // YAMLDescriber is an optional capability for DAOs that can render a single
 // resource as YAML, addressed by canonical ID. The same string is the input
 // the user edits when pressing 'e' on resources that also support edit.

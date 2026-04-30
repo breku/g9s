@@ -127,7 +127,7 @@ func (dv *DescribeView) Start(ctx context.Context) {
 	}
 	dv.app.tview.QueueUpdateDraw(func() {
 		dv.content = content
-		dv.TextView.SetText(highlight(content))
+		dv.TextView.SetText(colorizeYAML(content))
 		dv.TextView.ScrollToBeginning()
 	})
 }
