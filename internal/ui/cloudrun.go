@@ -98,7 +98,7 @@ func (v *CloudRunView) editService() bool {
 	if row == nil {
 		return true
 	}
-	name := row.ID
+	name := row.GetID()
 	short := lastSegmentUI(name)
 
 	// Fetch current YAML before suspending so any error is visible in the TUI.
@@ -188,8 +188,8 @@ func (v *CloudRunView) copyURL() bool {
 	if row == nil {
 		return true
 	}
-	url := row.Meta["url"]
-	if url == "" {
+	url, ok := row.CopyColumnValue()
+	if !ok {
 		return true
 	}
 	if err := clipboard.WriteAll(url); err != nil {
@@ -205,7 +205,7 @@ func (v *CloudRunView) openDescribe(asYAML bool) bool {
 	if row == nil {
 		return true
 	}
-	name := row.ID
+	name := row.GetID()
 	format := "Describe"
 	if asYAML {
 		format = "YAML"
@@ -234,10 +234,11 @@ func (v *CloudRunView) openLogs() bool {
 	if row == nil {
 		return true
 	}
-	// row.ID format: projects/<project>/locations/<location>/services/<name>
-	svcName := lastSegmentUI(row.ID)
-	project := projectFromResourceName(row.ID)
-	region := regionFromResourceName(row.ID)
+	// row ID format: projects/<project>/locations/<location>/services/<name>
+	id := row.GetID()
+	svcName := lastSegmentUI(id)
+	project := projectFromResourceName(id)
+	region := regionFromResourceName(id)
 
 	filter := fmt.Sprintf(`resource.type="cloud_run_revision" AND resource.labels.service_name="%s"`, svcName)
 	if region != "" {

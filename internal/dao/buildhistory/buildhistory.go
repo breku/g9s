@@ -74,16 +74,59 @@ func LogsBucketForBuild(b *cloudbuildpb.Build) string {
 	return ""
 }
 
-// Ensure BuildHistory satisfies Accessor and Paginator at compile time.
+// Ensure BuildHistory satisfies Accessor and Paginator, and BuildRow satisfies Row.
 var (
 	_ dao.Accessor  = (*BuildHistory)(nil)
 	_ dao.Paginator = (*BuildHistory)(nil)
+	_ dao.Row       = (*BuildRow)(nil)
 )
 
 const buildHistoryPageSize = 10
 
 // BuildHistory is the DAO for Cloud Build build executions (history).
 type BuildHistory struct{}
+
+// BuildRow is the typed row for a Cloud Build execution. Fields exposed here
+// support the cancel + log overlays without per-action map lookups.
+type BuildRow struct {
+	id      string
+	rowType dao.RowType
+	columns []dao.Column
+
+	BuildID     string
+	LogsBucket  string
+	LogURL      string
+	Status      string
+	Project     string
+	LoggingMode string
+	CreateTime  string
+}
+
+// GetID implements dao.Row.
+func (r *BuildRow) GetID() string { return r.id }
+
+// GetType implements dao.Row.
+func (r *BuildRow) GetType() dao.RowType { return r.rowType }
+
+// GetColumns implements dao.Row.
+func (r *BuildRow) GetColumns() []dao.Column { return r.columns }
+
+// SetStatusColumn updates the STATUS column text in place. Used by the UI to
+// render optimistic state ("Cancelling…") between user action and next poll.
+func (r *BuildRow) SetStatusColumn(text string) {
+	const statusCol = 2 // ID, TRIGGER, STATUS
+	if statusCol < len(r.columns) {
+		r.columns[statusCol].Text = text
+	}
+}
+
+// CopyColumnValue copies the full build ID — useful for `gcloud builds describe`.
+func (r *BuildRow) CopyColumnValue() (string, bool) {
+	if r.BuildID == "" {
+		return "", false
+	}
+	return r.BuildID, true
+}
 
 // Resource returns the stable identifier for this resource type.
 func (b *BuildHistory) Resource() string { return "buildhistory" }
@@ -147,7 +190,7 @@ func (b *BuildHistory) NextPage(ctx context.Context, project, pageToken string, 
 	}, nil
 }
 
-func rowFromBuild(b *cloudbuildpb.Build) dao.Row {
+func rowFromBuild(b *cloudbuildpb.Build) *BuildRow {
 	id := b.Id
 	if len(id) > 8 {
 		id = id[:8]
@@ -194,10 +237,10 @@ func rowFromBuild(b *cloudbuildpb.Build) dao.Row {
 		createTime = b.CreateTime.AsTime().UTC().Format(time.RFC3339)
 	}
 
-	return dao.Row{
-		ID:   b.Name,
-		Type: rowType,
-		Columns: []dao.Column{
+	return &BuildRow{
+		id:      b.Name,
+		rowType: rowType,
+		columns: []dao.Column{
 			{Text: id},
 			{Text: trigger},
 			{Text: status},
@@ -206,15 +249,13 @@ func rowFromBuild(b *cloudbuildpb.Build) dao.Row {
 			{Text: branch},
 			{Text: images},
 		},
-		Meta: map[string]string{
-			"buildId":     b.Id,
-			"logsBucket":  strings.TrimPrefix(b.LogsBucket, "gs://"),
-			"logUrl":      b.LogUrl,
-			"status":      status,
-			"project":     b.ProjectId,
-			"loggingMode": loggingMode,
-			"createTime":  createTime,
-		},
+		BuildID:     b.Id,
+		LogsBucket:  strings.TrimPrefix(b.LogsBucket, "gs://"),
+		LogURL:      b.LogUrl,
+		Status:      status,
+		Project:     b.ProjectId,
+		LoggingMode: loggingMode,
+		CreateTime:  createTime,
 	}
 }
 

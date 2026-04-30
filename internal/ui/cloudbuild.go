@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/cloudbuild"
 	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -75,14 +76,11 @@ func (v *CloudBuildView) openRunOverlay() bool {
 	if row == nil {
 		return true
 	}
-	triggerName := row.Columns[0].Text
-	project := row.Meta["project"]
-	triggerID := row.Meta["triggerId"]
-	branch := row.Meta["branch"]
-	if triggerID == "" {
+	tr, ok := row.(*cloudbuild.TriggerRow)
+	if !ok || tr.TriggerID == "" {
 		return true
 	}
-	overlay := NewRunOverlay(v.app, triggerName, project, triggerID, branch)
+	overlay := NewRunOverlay(v.app, tr.Name, tr.Project, tr.TriggerID, tr.Branch)
 	v.app.PushOverlay(overlay)
 	return true
 }

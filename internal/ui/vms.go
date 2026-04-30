@@ -88,17 +88,15 @@ func (v *VMsView) confirmDelete() bool {
 	if row == nil {
 		return true
 	}
-	project := vmProjectFromSelfLink(row.ID)
-	zone := row.Meta["zone"]
-	name := row.Meta["name"]
-	if project == "" || zone == "" || name == "" {
+	ir, ok := row.(*vms.InstanceRow)
+	if !ok || ir.Project == "" || ir.Zone == "" || ir.Name == "" {
 		return true
 	}
 
-	prompt := fmt.Sprintf("Delete instance [yellow]%s[white] in zone [yellow]%s[white]?", name, zone)
-	title := fmt.Sprintf("VM – %s", name)
+	prompt := fmt.Sprintf("Delete instance [yellow]%s[white] in zone [yellow]%s[white]?", ir.Name, ir.Zone)
+	title := fmt.Sprintf("VM – %s", ir.Name)
 	co := NewConfirmOverlay(v.app, title, prompt, func(ctx context.Context) error {
-		return vms.DeleteVM(ctx, project, zone, name)
+		return vms.DeleteVM(ctx, ir.Project, ir.Zone, ir.Name)
 	})
 	v.app.PushOverlay(co)
 	return true
@@ -111,12 +109,8 @@ func (v *VMsView) openDescribe(asYAML bool) bool {
 	if row == nil {
 		return true
 	}
-	// row.ID is the self link:
-	//   https://www.googleapis.com/compute/v1/projects/<p>/zones/<z>/instances/<n>
-	project := vmProjectFromSelfLink(row.ID)
-	zone := row.Meta["zone"]
-	name := row.Meta["name"]
-	if project == "" || zone == "" || name == "" {
+	ir, ok := row.(*vms.InstanceRow)
+	if !ok || ir.Project == "" || ir.Zone == "" || ir.Name == "" {
 		return true
 	}
 
@@ -124,16 +118,16 @@ func (v *VMsView) openDescribe(asYAML bool) bool {
 	if asYAML {
 		format = "YAML"
 	}
-	title := fmt.Sprintf("%s – %s", format, name)
+	title := fmt.Sprintf("%s – %s", format, ir.Name)
 
 	var fetchFn func(ctx context.Context) (string, error)
 	if asYAML {
 		fetchFn = func(ctx context.Context) (string, error) {
-			return vms.DescribeVMYAML(ctx, project, zone, name)
+			return vms.DescribeVMYAML(ctx, ir.Project, ir.Zone, ir.Name)
 		}
 	} else {
 		fetchFn = func(ctx context.Context) (string, error) {
-			return vms.DescribeVMText(ctx, project, zone, name)
+			return vms.DescribeVMText(ctx, ir.Project, ir.Zone, ir.Name)
 		}
 	}
 
@@ -170,19 +164,17 @@ func (v *VMsView) openLogs() bool {
 	if row == nil {
 		return true
 	}
-	project := vmProjectFromSelfLink(row.ID)
-	name := row.Meta["name"]
-	id := row.Meta["id"]
-	if project == "" || id == "" {
+	ir, ok := row.(*vms.InstanceRow)
+	if !ok || ir.Project == "" || ir.NumericID == "" {
 		return true
 	}
 
-	filter := fmt.Sprintf(`resource.type="gce_instance" AND resource.labels.instance_id="%s"`, id)
+	filter := fmt.Sprintf(`resource.type="gce_instance" AND resource.labels.instance_id="%s"`, ir.NumericID)
 
 	cfg := LogViewConfig{
-		Title:       fmt.Sprintf("Logs – %s", name),
+		Title:       fmt.Sprintf("Logs – %s", ir.Name),
 		Streaming:   true,
-		Project:     project,
+		Project:     ir.Project,
 		LogFilter:   filter,
 		LogSince:    time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339),
 		LogPageSize: 200,
@@ -190,16 +182,4 @@ func (v *VMsView) openLogs() bool {
 	lv := NewLogViewFromConfig(v.app, cfg)
 	v.app.PushOverlay(lv)
 	return true
-}
-
-// vmProjectFromSelfLink extracts the project ID from a Compute self link.
-// Format: .../projects/<project>/zones/<zone>/instances/<name>
-func vmProjectFromSelfLink(self string) string {
-	parts := splitSlash(self)
-	for i, p := range parts {
-		if p == "projects" && i+1 < len(parts) {
-			return parts[i+1]
-		}
-	}
-	return ""
 }

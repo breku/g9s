@@ -12,11 +12,40 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-// Ensure Secrets satisfies Accessor at compile time.
-var _ dao.Accessor = (*Secrets)(nil)
+// Ensure Secrets satisfies Accessor and SecretRow satisfies Row at compile time.
+var (
+	_ dao.Accessor = (*Secrets)(nil)
+	_ dao.Row      = (*SecretRow)(nil)
+)
 
 // Secrets is the DAO for GCP Secret Manager secrets.
 type Secrets struct{}
+
+// SecretRow is the typed row for a Secret Manager secret. Name is the short
+// (last-segment) name; the fully-qualified name is available via GetID().
+type SecretRow struct {
+	id      string
+	rowType dao.RowType
+	columns []dao.Column
+	Name    string
+}
+
+// GetID implements dao.Row. Returns the fully-qualified secret name.
+func (r *SecretRow) GetID() string { return r.id }
+
+// GetType implements dao.Row.
+func (r *SecretRow) GetType() dao.RowType { return r.rowType }
+
+// GetColumns implements dao.Row.
+func (r *SecretRow) GetColumns() []dao.Column { return r.columns }
+
+// CopyColumnValue copies the short secret name (gcloud-friendly).
+func (r *SecretRow) CopyColumnValue() (string, bool) {
+	if r.Name == "" {
+		return "", false
+	}
+	return r.Name, true
+}
 
 // Resource returns the stable identifier for this resource type.
 func (s *Secrets) Resource() string { return "secrets" }
@@ -62,7 +91,7 @@ func (s *Secrets) List(ctx context.Context, project string) (*dao.TableData, err
 	}, nil
 }
 
-func rowFromSecret(s *secretmanagerpb.Secret) dao.Row {
+func rowFromSecret(s *secretmanagerpb.Secret) *SecretRow {
 	name := dao.LastSegment(s.Name)
 	created := "—"
 	if s.CreateTime != nil {
@@ -92,13 +121,11 @@ func rowFromSecret(s *secretmanagerpb.Secret) dao.Row {
 		}
 	}
 
-	return dao.Row{
-		ID:   s.Name,
-		Type: dao.RowTypeActive,
-		Meta: map[string]string{
-			"name": name,
-		},
-		Columns: []dao.Column{
+	return &SecretRow{
+		id:      s.Name,
+		rowType: dao.RowTypeActive,
+		Name:    name,
+		columns: []dao.Column{
 			{Text: name},
 			{Text: replication},
 			{Text: labels},

@@ -27,16 +27,21 @@ type Column struct {
 }
 
 // Row represents a single resource row returned by a DAO.
-// Columns must match the headers returned by the same DAO's Header() method.
-// Meta carries DAO-specific metadata that the view layer may use for actions
-// (e.g. log bucket, status) without exposing them as visible columns.
-type Row struct {
-	// ID is the fully-qualified resource name, used to identify the row.
-	ID      string
-	Type    RowType
-	Columns []Column
-	// Meta holds arbitrary key-value metadata set by the DAO.
-	Meta map[string]string
+// Concrete row types live in per-resource subpackages and carry typed fields
+// the UI may need for actions. The shared columns produced by GetColumns()
+// must match the headers returned by the same DAO's Header() method.
+type Row interface {
+	// GetID returns the canonical, fully-qualified resource name used to
+	// identify this row across cache reads, log lookups and action calls.
+	GetID() string
+	// GetType returns the semantic state used for row colouring.
+	GetType() RowType
+	// GetColumns returns the cell values to render, in header order.
+	GetColumns() []Column
+	// CopyColumnValue returns the value the 'c' key copies to the clipboard
+	// for this resource type. The bool is false when nothing meaningful is
+	// available to copy (the UI then no-ops).
+	CopyColumnValue() (string, bool)
 }
 
 // TableData is the full data set produced by a DAO: column headers + rows.

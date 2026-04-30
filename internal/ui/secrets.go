@@ -75,10 +75,10 @@ func (v *SecretsView) viewSecret() bool {
 	if row == nil {
 		return true
 	}
-	name := row.ID
-	short := row.Meta["name"]
-	if short == "" {
-		short = lastSegmentUI(name)
+	name := row.GetID()
+	short := lastSegmentUI(name)
+	if sr, ok := row.(*secrets.SecretRow); ok && sr.Name != "" {
+		short = sr.Name
 	}
 	title := fmt.Sprintf("Secret – %s", short)
 

@@ -13,11 +13,43 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-// Ensure CloudBuild satisfies Accessor at compile time.
-var _ dao.Accessor = (*CloudBuild)(nil)
+// Ensure CloudBuild satisfies Accessor and TriggerRow satisfies Row at compile time.
+var (
+	_ dao.Accessor = (*CloudBuild)(nil)
+	_ dao.Row      = (*TriggerRow)(nil)
+)
 
 // CloudBuild is the DAO for Cloud Build triggers.
 type CloudBuild struct{}
+
+// TriggerRow is the typed row for a Cloud Build trigger.
+// Project, TriggerID and Branch are surfaced for the run-trigger overlay.
+type TriggerRow struct {
+	id        string
+	rowType   dao.RowType
+	columns   []dao.Column
+	Name      string
+	Project   string
+	TriggerID string
+	Branch    string
+}
+
+// GetID implements dao.Row.
+func (r *TriggerRow) GetID() string { return r.id }
+
+// GetType implements dao.Row.
+func (r *TriggerRow) GetType() dao.RowType { return r.rowType }
+
+// GetColumns implements dao.Row.
+func (r *TriggerRow) GetColumns() []dao.Column { return r.columns }
+
+// CopyColumnValue copies the trigger name (the gcloud-friendly identifier).
+func (r *TriggerRow) CopyColumnValue() (string, bool) {
+	if r.Name == "" {
+		return "", false
+	}
+	return r.Name, true
+}
 
 // Resource returns the stable identifier for this resource type.
 func (c *CloudBuild) Resource() string { return "cloudbuild" }
@@ -63,8 +95,8 @@ func (c *CloudBuild) List(ctx context.Context, project string) (*dao.TableData, 
 	}, nil
 }
 
-// rowFromTrigger converts a BuildTrigger proto to a table Row.
-func rowFromTrigger(t *cloudbuildpb.BuildTrigger) dao.Row {
+// rowFromTrigger converts a BuildTrigger proto to a typed TriggerRow.
+func rowFromTrigger(t *cloudbuildpb.BuildTrigger) *TriggerRow {
 	name := t.Name
 	if name == "" {
 		name = t.Id
@@ -92,15 +124,14 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) dao.Row {
 		desc = desc[:57] + "..."
 	}
 
-	return dao.Row{
-		ID:   t.ResourceName,
-		Type: colType,
-		Meta: map[string]string{
-			"triggerId": t.Id,
-			"project":   projectFromResourceName(t.ResourceName),
-			"branch":    triggerBranch(t),
-		},
-		Columns: []dao.Column{
+	return &TriggerRow{
+		id:        t.ResourceName,
+		rowType:   colType,
+		Name:      name,
+		Project:   projectFromResourceName(t.ResourceName),
+		TriggerID: t.Id,
+		Branch:    triggerBranch(t),
+		columns: []dao.Column{
 			{Text: name},
 			{Text: desc},
 			{Text: status},

@@ -16,11 +16,41 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Ensure CloudRun satisfies Accessor at compile time.
-var _ dao.Accessor = (*CloudRun)(nil)
+// Ensure CloudRun satisfies Accessor and ServiceRow satisfies Row at compile time.
+var (
+	_ dao.Accessor = (*CloudRun)(nil)
+	_ dao.Row      = (*ServiceRow)(nil)
+)
 
 // CloudRun is the DAO for Cloud Run v2 Services.
 type CloudRun struct{}
+
+// ServiceRow is the typed row for a Cloud Run service.
+// URL is exposed so the UI handler can copy or open it without map lookups.
+type ServiceRow struct {
+	id      string
+	rowType dao.RowType
+	columns []dao.Column
+	URL     string
+}
+
+// GetID implements dao.Row.
+func (r *ServiceRow) GetID() string { return r.id }
+
+// GetType implements dao.Row.
+func (r *ServiceRow) GetType() dao.RowType { return r.rowType }
+
+// GetColumns implements dao.Row.
+func (r *ServiceRow) GetColumns() []dao.Column { return r.columns }
+
+// CopyColumnValue implements dao.Row. The copy target for a Cloud Run row is
+// the service URL — empty (false) when the service has no URL yet.
+func (r *ServiceRow) CopyColumnValue() (string, bool) {
+	if r.URL == "" {
+		return "", false
+	}
+	return r.URL, true
+}
 
 // Resource returns the stable identifier for this resource type.
 func (c *CloudRun) Resource() string { return "cloudrun" }
@@ -67,8 +97,8 @@ func (c *CloudRun) List(ctx context.Context, project string) (*dao.TableData, er
 	}, nil
 }
 
-// rowFromService converts a Cloud Run Service proto to a table Row.
-func rowFromService(svc *runpb.Service) dao.Row {
+// rowFromService converts a Cloud Run Service proto to a typed ServiceRow.
+func rowFromService(svc *runpb.Service) *ServiceRow {
 	name := dao.LastSegment(svc.Name)
 	region := locationFromName(svc.Name)
 	status := conditionState(svc.TerminalCondition)
@@ -86,13 +116,11 @@ func rowFromService(svc *runpb.Service) dao.Row {
 		colType = dao.RowTypeError
 	}
 
-	return dao.Row{
-		ID:   svc.Name,
-		Type: colType,
-		Meta: map[string]string{
-			"url": url,
-		},
-		Columns: []dao.Column{
+	return &ServiceRow{
+		id:      svc.Name,
+		rowType: colType,
+		URL:     url,
+		columns: []dao.Column{
 			{Text: name},
 			{Text: region},
 			{Text: status},

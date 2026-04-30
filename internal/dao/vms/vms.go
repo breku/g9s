@@ -15,11 +15,53 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Ensure VMs satisfies Accessor at compile time.
-var _ dao.Accessor = (*VMs)(nil)
+// Ensure VMs satisfies Accessor and InstanceRow satisfies Row at compile time.
+var (
+	_ dao.Accessor = (*VMs)(nil)
+	_ dao.Row      = (*InstanceRow)(nil)
+)
 
 // VMs is the DAO for Compute Engine VM instances.
 type VMs struct{}
+
+// InstanceRow is the typed row for a Compute Engine instance.
+// Project is parsed from the self-link in the constructor; Zone, Name and the
+// numeric instance ID are surfaced for delete/describe/log handlers.
+type InstanceRow struct {
+	id      string
+	rowType dao.RowType
+	columns []dao.Column
+
+	Project    string
+	Zone       string
+	Name       string
+	NumericID  string
+	InternalIP string
+	ExternalIP string
+}
+
+// GetID implements dao.Row. Returns the instance self-link.
+func (r *InstanceRow) GetID() string { return r.id }
+
+// GetType implements dao.Row.
+func (r *InstanceRow) GetType() dao.RowType { return r.rowType }
+
+// GetColumns implements dao.Row.
+func (r *InstanceRow) GetColumns() []dao.Column { return r.columns }
+
+// CopyColumnValue copies the external IP if present, otherwise the internal IP,
+// otherwise the instance name.
+func (r *InstanceRow) CopyColumnValue() (string, bool) {
+	switch {
+	case r.ExternalIP != "":
+		return r.ExternalIP, true
+	case r.InternalIP != "":
+		return r.InternalIP, true
+	case r.Name != "":
+		return r.Name, true
+	}
+	return "", false
+}
 
 // Resource returns the stable identifier for this resource type.
 func (v *VMs) Resource() string { return "vms" }
@@ -65,7 +107,7 @@ func (v *VMs) List(ctx context.Context, project string) (*dao.TableData, error) 
 	}, nil
 }
 
-func rowFromInstance(inst *computepb.Instance) dao.Row {
+func rowFromInstance(inst *computepb.Instance) *InstanceRow {
 	name := inst.GetName()
 	zone := dao.LastSegment(inst.GetZone())
 	machine := dao.LastSegment(inst.GetMachineType())
@@ -90,17 +132,16 @@ func rowFromInstance(inst *computepb.Instance) dao.Row {
 		colType = dao.RowTypeError
 	}
 
-	return dao.Row{
-		ID:   inst.GetSelfLink(),
-		Type: colType,
-		Meta: map[string]string{
-			"zone":       zone,
-			"name":       name,
-			"id":         fmt.Sprintf("%d", inst.GetId()),
-			"internalIP": internalIP,
-			"externalIP": externalIP,
-		},
-		Columns: []dao.Column{
+	return &InstanceRow{
+		id:         inst.GetSelfLink(),
+		rowType:    colType,
+		Project:    projectFromSelfLink(inst.GetSelfLink()),
+		Zone:       zone,
+		Name:       name,
+		NumericID:  fmt.Sprintf("%d", inst.GetId()),
+		InternalIP: internalIP,
+		ExternalIP: externalIP,
+		columns: []dao.Column{
 			{Text: name},
 			{Text: zone},
 			{Text: machine},
@@ -110,6 +151,18 @@ func rowFromInstance(inst *computepb.Instance) dao.Row {
 			{Text: created},
 		},
 	}
+}
+
+// projectFromSelfLink extracts the project ID from a Compute self-link.
+// Format: .../projects/<project>/zones/<zone>/instances/<name>
+func projectFromSelfLink(self string) string {
+	parts := strings.Split(self, "/")
+	for i, p := range parts {
+		if p == "projects" && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+	return ""
 }
 
 func instanceIPs(inst *computepb.Instance) (internal, external string) {

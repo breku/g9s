@@ -57,14 +57,14 @@ func (r *ResourceTable) SetFilter(f string) {
 
 // SelectedRow returns the dao.Row for the currently selected table row.
 // Returns nil if nothing is selected or the table is empty.
-func (r *ResourceTable) SelectedRow() *dao.Row {
+func (r *ResourceTable) SelectedRow() dao.Row {
 	row, _ := r.Table.GetSelection()
 	// row 0 is the header; data rows start at 1.
 	idx := row - 1
 	if idx < 0 || idx >= len(r.rowIndex) {
 		return nil
 	}
-	return &r.rowIndex[idx]
+	return r.rowIndex[idx]
 }
 
 // repaint redraws the table from lastData, applying the current filter.
@@ -94,8 +94,8 @@ func (r *ResourceTable) repaint() {
 			continue
 		}
 
-		color := rowTypeColor(row.Type)
-		for col, c := range row.Columns {
+		color := rowTypeColor(row.GetType())
+		for col, c := range row.GetColumns() {
 			cell := tview.NewTableCell(" " + c.Text + " ").
 				SetTextColor(color).
 				SetExpansion(1)
@@ -115,7 +115,7 @@ func (r *ResourceTable) repaint() {
 
 // rowMatchesFilter returns true if any column value contains needle (case-insensitive).
 func rowMatchesFilter(row dao.Row, needle string) bool {
-	for _, col := range row.Columns {
+	for _, col := range row.GetColumns() {
 		if strings.Contains(strings.ToLower(col.Text), needle) {
 			return true
 		}

@@ -98,46 +98,41 @@ func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
 	if row == nil {
 		return true
 	}
-	buildID := row.Meta["buildId"]
-	bucket := row.Meta["logsBucket"]
-	status := row.Meta["status"]
-	project := row.Meta["project"]
-	loggingMode := row.Meta["loggingMode"]
-	createTime := row.Meta["createTime"]
-	if buildID == "" {
+	br, ok := row.(*buildhistory.BuildRow)
+	if !ok || br.BuildID == "" {
 		return true
 	}
 
 	// CLOUD_LOGGING_ONLY: bucket is always empty; go straight to Cloud Logging path.
-	if loggingMode == "CLOUD_LOGGING_ONLY" {
-		v.openLogs(buildID, "", status, project, loggingMode, createTime)
+	if br.LoggingMode == "CLOUD_LOGGING_ONLY" {
+		v.openLogs(br.BuildID, "", br.Status, br.Project, br.LoggingMode, br.CreateTime)
 		return true
 	}
 
-	if bucket != "" {
-		v.openLogs(buildID, bucket, status, project, loggingMode, createTime)
+	if br.LogsBucket != "" {
+		v.openLogs(br.BuildID, br.LogsBucket, br.Status, br.Project, br.LoggingMode, br.CreateTime)
 		return true
 	}
 
 	// Bucket not populated yet — call GetBuild to resolve it.
 	go func() {
-		b, err := buildhistory.GetBuild(v.app.ctx, project, buildID)
+		b, err := buildhistory.GetBuild(v.app.ctx, br.Project, br.BuildID)
 		if err != nil {
-			log.Error().Err(err).Str("buildId", buildID).Msg("build history: GetBuild failed")
+			log.Error().Err(err).Str("buildId", br.BuildID).Msg("build history: GetBuild failed")
 			return
 		}
 		resolvedMode := b.Options.GetLogging().String()
 		resolvedBucket := buildhistory.LogsBucketForBuild(b)
-		resolvedCreate := createTime
+		resolvedCreate := br.CreateTime
 		if b.CreateTime != nil {
 			resolvedCreate = b.CreateTime.AsTime().UTC().Format("2006-01-02T15:04:05Z")
 		}
 		if resolvedMode != "CLOUD_LOGGING_ONLY" && resolvedBucket == "" {
-			log.Warn().Str("buildId", buildID).Msg("build history: cannot determine log bucket")
+			log.Warn().Str("buildId", br.BuildID).Msg("build history: cannot determine log bucket")
 			return
 		}
 		v.app.tview.QueueUpdateDraw(func() {
-			v.openLogs(buildID, resolvedBucket, status, project, resolvedMode, resolvedCreate)
+			v.openLogs(br.BuildID, resolvedBucket, br.Status, br.Project, resolvedMode, resolvedCreate)
 		})
 	}()
 	return true
@@ -151,18 +146,16 @@ func (v *BuildHistoryView) cancelSelected() bool {
 	if row == nil {
 		return true
 	}
-	buildID := row.Meta["buildId"]
-	project := row.Meta["project"]
-	status := row.Meta["status"]
-	if buildID == "" {
+	br, ok := row.(*buildhistory.BuildRow)
+	if !ok || br.BuildID == "" {
 		return true
 	}
 
 	// Only allow cancelling builds that are in a non-terminal state.
-	switch status {
+	switch br.Status {
 	case "Working", "Queued", "Pending":
 	default:
-		log.Debug().Str("buildId", buildID).Str("status", status).
+		log.Debug().Str("buildId", br.BuildID).Str("status", br.Status).
 			Msg("build history: cancel ignored — build not in a cancellable state")
 		return true
 	}
@@ -171,17 +164,10 @@ func (v *BuildHistoryView) cancelSelected() bool {
 	// user sees immediate feedback. The next poll tick will replace the row
 	// with the real "Cancelled" status from the API.
 	const statusCol = 2 // ID, TRIGGER, STATUS
-	cancellingText := status + " (Cancelling...)"
-	for i := range v.allRows {
-		if v.allRows[i].Meta["buildId"] == buildID {
-			if statusCol < len(v.allRows[i].Columns) {
-				v.allRows[i].Columns[statusCol].Text = cancellingText
-			}
-			break
-		}
-	}
+	cancellingText := br.Status + " (Cancelling...)"
+	br.SetStatusColumn(cancellingText)
 	for i, r := range v.rowIndex {
-		if r.Meta["buildId"] == buildID {
+		if other, ok := r.(*buildhistory.BuildRow); ok && other.BuildID == br.BuildID {
 			cell := v.Table.GetCell(i+1, statusCol)
 			if cell != nil {
 				cell.SetText(" " + cancellingText + " ")
@@ -191,11 +177,11 @@ func (v *BuildHistoryView) cancelSelected() bool {
 	}
 
 	go func() {
-		if err := buildhistory.CancelBuild(v.app.ctx, project, buildID); err != nil {
-			log.Error().Err(err).Str("buildId", buildID).Msg("build history: cancel failed")
+		if err := buildhistory.CancelBuild(v.app.ctx, br.Project, br.BuildID); err != nil {
+			log.Error().Err(err).Str("buildId", br.BuildID).Msg("build history: cancel failed")
 			return
 		}
-		log.Info().Str("buildId", buildID).Msg("build history: cancel requested")
+		log.Info().Str("buildId", br.BuildID).Msg("build history: cancel requested")
 	}()
 	return true
 }
