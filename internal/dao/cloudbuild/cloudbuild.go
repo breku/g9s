@@ -1,4 +1,5 @@
-package dao
+// Package cloudbuild provides the DAO for Cloud Build triggers.
+package cloudbuild
 
 import (
 	"context"
@@ -7,12 +8,13 @@ import (
 
 	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
 	"google.golang.org/api/iterator"
 )
 
 // Ensure CloudBuild satisfies Accessor at compile time.
-var _ Accessor = (*CloudBuild)(nil)
+var _ dao.Accessor = (*CloudBuild)(nil)
 
 // CloudBuild is the DAO for Cloud Build triggers.
 type CloudBuild struct{}
@@ -26,7 +28,7 @@ func (c *CloudBuild) Header() []string {
 }
 
 // List fetches all Cloud Build triggers in the given project (global location).
-func (c *CloudBuild) List(ctx context.Context, project string) (*TableData, error) {
+func (c *CloudBuild) List(ctx context.Context, project string) (*dao.TableData, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cloudbuild: credentials: %w", err)
@@ -42,7 +44,7 @@ func (c *CloudBuild) List(ctx context.Context, project string) (*TableData, erro
 		Parent: fmt.Sprintf("projects/%s/locations/global", project),
 	}
 
-	var rows []Row
+	var rows []dao.Row
 	it := client.ListBuildTriggers(ctx, req)
 	for {
 		trigger, err := it.Next()
@@ -55,14 +57,14 @@ func (c *CloudBuild) List(ctx context.Context, project string) (*TableData, erro
 		rows = append(rows, rowFromTrigger(trigger))
 	}
 
-	return &TableData{
+	return &dao.TableData{
 		Header: c.Header(),
 		Rows:   rows,
 	}, nil
 }
 
 // rowFromTrigger converts a BuildTrigger proto to a table Row.
-func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
+func rowFromTrigger(t *cloudbuildpb.BuildTrigger) dao.Row {
 	name := t.Name
 	if name == "" {
 		name = t.Id
@@ -73,16 +75,16 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
 		status = "Disabled"
 	}
 
-	colType := RowTypeNotActive
+	colType := dao.RowTypeNotActive
 	if !t.Disabled {
-		colType = RowTypeActive
+		colType = dao.RowTypeActive
 	}
 
 	event := triggerEvent(t)
 	repo := triggerRepo(t)
 	created := "—"
 	if t.CreateTime != nil {
-		created = formatTime(t.CreateTime.AsTime())
+		created = dao.FormatTime(t.CreateTime.AsTime())
 	}
 
 	desc := t.Description
@@ -90,7 +92,7 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
 		desc = desc[:57] + "..."
 	}
 
-	return Row{
+	return dao.Row{
 		ID:   t.ResourceName,
 		Type: colType,
 		Meta: map[string]string{
@@ -98,7 +100,7 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
 			"project":   projectFromResourceName(t.ResourceName),
 			"branch":    triggerBranch(t),
 		},
-		Columns: []Column{
+		Columns: []dao.Column{
 			{Text: name},
 			{Text: desc},
 			{Text: status},
@@ -109,14 +111,12 @@ func rowFromTrigger(t *cloudbuildpb.BuildTrigger) Row {
 	}
 }
 
-// triggerBranch extracts the configured branch from a trigger, trying
-// TriggerTemplate, SourceToBuild.Ref, and GitHub push event in order.
+// triggerBranch extracts the configured branch from a trigger.
 func triggerBranch(t *cloudbuildpb.BuildTrigger) string {
 	if t.TriggerTemplate != nil && t.TriggerTemplate.GetBranchName() != "" {
 		return t.TriggerTemplate.GetBranchName()
 	}
 	if t.SourceToBuild != nil && t.SourceToBuild.Ref != "" {
-		// Ref is typically "refs/heads/<branch>" — strip the prefix for display.
 		ref := t.SourceToBuild.Ref
 		if after, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
 			return after
@@ -170,6 +170,7 @@ func RunTrigger(ctx context.Context, project, triggerID, branch string) error {
 	}
 	return nil
 }
+
 func triggerEvent(t *cloudbuildpb.BuildTrigger) string {
 	if t.WebhookConfig != nil {
 		return "Webhook"
@@ -195,7 +196,6 @@ func triggerEvent(t *cloudbuildpb.BuildTrigger) string {
 	return "Manual"
 }
 
-// repoEventType extracts the event type from RepositoryEventConfig.
 func repoEventType(cfg *cloudbuildpb.RepositoryEventConfig) string {
 	if cfg.GetPush() != nil {
 		return "Push"
@@ -206,7 +206,6 @@ func repoEventType(cfg *cloudbuildpb.RepositoryEventConfig) string {
 	return "Repo Event"
 }
 
-// triggerRepo extracts the repository name from the trigger config.
 func triggerRepo(t *cloudbuildpb.BuildTrigger) string {
 	if t.Github != nil {
 		owner := t.Github.Owner
@@ -222,7 +221,6 @@ func triggerRepo(t *cloudbuildpb.BuildTrigger) string {
 		return t.TriggerTemplate.RepoName
 	}
 	if t.RepositoryEventConfig != nil && t.RepositoryEventConfig.Repository != "" {
-		// Format: projects/P/locations/L/connections/C/repositories/R
 		parts := strings.Split(t.RepositoryEventConfig.Repository, "/")
 		if len(parts) >= 2 {
 			return parts[len(parts)-1]

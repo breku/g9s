@@ -9,6 +9,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/cloudrun"
 	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -101,7 +102,7 @@ func (v *CloudRunView) editService() bool {
 	short := lastSegmentUI(name)
 
 	// Fetch current YAML before suspending so any error is visible in the TUI.
-	yamlStr, err := dao.DescribeYAML(v.app.ctx, name)
+	yamlStr, err := cloudrun.DescribeYAML(v.app.ctx, name)
 	if err != nil {
 		log.Error().Err(err).Str("service", name).Msg("cloudrun: fetch for edit failed")
 		v.showEditError(short, err)
@@ -178,7 +179,7 @@ func runEditorAndUpdate(ctx context.Context, shortName, original string) error {
 		return nil
 	}
 
-	return dao.UpdateServiceFromYAML(ctx, string(edited))
+	return cloudrun.UpdateServiceFromYAML(ctx, string(edited))
 }
 
 // copyURL copies the selected service's URL to the system clipboard.
@@ -214,11 +215,11 @@ func (v *CloudRunView) openDescribe(asYAML bool) bool {
 	var fetchFn func(ctx context.Context) (string, error)
 	if asYAML {
 		fetchFn = func(ctx context.Context) (string, error) {
-			return dao.DescribeYAML(ctx, name)
+			return cloudrun.DescribeYAML(ctx, name)
 		}
 	} else {
 		fetchFn = func(ctx context.Context) (string, error) {
-			return dao.DescribeText(ctx, name)
+			return cloudrun.DescribeText(ctx, name)
 		}
 	}
 

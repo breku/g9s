@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/vms"
 	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -81,7 +82,7 @@ func (v *VMsView) HandleKey(event *tcell.EventKey) bool {
 	return false
 }
 
-// confirmDelete pushes a ConfirmOverlay; on 'y' it calls dao.DeleteVM.
+// confirmDelete pushes a ConfirmOverlay; on 'y' it calls vms.DeleteVM.
 func (v *VMsView) confirmDelete() bool {
 	row := v.SelectedRow()
 	if row == nil {
@@ -97,7 +98,7 @@ func (v *VMsView) confirmDelete() bool {
 	prompt := fmt.Sprintf("Delete instance [yellow]%s[white] in zone [yellow]%s[white]?", name, zone)
 	title := fmt.Sprintf("VM – %s", name)
 	co := NewConfirmOverlay(v.app, title, prompt, func(ctx context.Context) error {
-		return dao.DeleteVM(ctx, project, zone, name)
+		return vms.DeleteVM(ctx, project, zone, name)
 	})
 	v.app.PushOverlay(co)
 	return true
@@ -128,11 +129,11 @@ func (v *VMsView) openDescribe(asYAML bool) bool {
 	var fetchFn func(ctx context.Context) (string, error)
 	if asYAML {
 		fetchFn = func(ctx context.Context) (string, error) {
-			return dao.DescribeVMYAML(ctx, project, zone, name)
+			return vms.DescribeVMYAML(ctx, project, zone, name)
 		}
 	} else {
 		fetchFn = func(ctx context.Context) (string, error) {
-			return dao.DescribeVMText(ctx, project, zone, name)
+			return vms.DescribeVMText(ctx, project, zone, name)
 		}
 	}
 

@@ -1,4 +1,5 @@
-package dao
+// Package secrets provides the DAO for GCP Secret Manager secrets.
+package secrets
 
 import (
 	"context"
@@ -6,12 +7,13 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
 	"google.golang.org/api/iterator"
 )
 
 // Ensure Secrets satisfies Accessor at compile time.
-var _ Accessor = (*Secrets)(nil)
+var _ dao.Accessor = (*Secrets)(nil)
 
 // Secrets is the DAO for GCP Secret Manager secrets.
 type Secrets struct{}
@@ -25,7 +27,7 @@ func (s *Secrets) Header() []string {
 }
 
 // List fetches all secrets in the given project.
-func (s *Secrets) List(ctx context.Context, project string) (*TableData, error) {
+func (s *Secrets) List(ctx context.Context, project string) (*dao.TableData, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("secrets: credentials: %w", err)
@@ -41,7 +43,7 @@ func (s *Secrets) List(ctx context.Context, project string) (*TableData, error) 
 		Parent: fmt.Sprintf("projects/%s", project),
 	}
 
-	var rows []Row
+	var rows []dao.Row
 	it := client.ListSecrets(ctx, req)
 	for {
 		secret, err := it.Next()
@@ -54,18 +56,17 @@ func (s *Secrets) List(ctx context.Context, project string) (*TableData, error) 
 		rows = append(rows, rowFromSecret(secret))
 	}
 
-	return &TableData{
+	return &dao.TableData{
 		Header: s.Header(),
 		Rows:   rows,
 	}, nil
 }
 
-// rowFromSecret converts a Secret proto to a table Row.
-func rowFromSecret(s *secretmanagerpb.Secret) Row {
-	name := lastSegment(s.Name)
+func rowFromSecret(s *secretmanagerpb.Secret) dao.Row {
+	name := dao.LastSegment(s.Name)
 	created := "—"
 	if s.CreateTime != nil {
-		created = formatTime(s.CreateTime.AsTime())
+		created = dao.FormatTime(s.CreateTime.AsTime())
 	}
 
 	replication := "—"
@@ -91,13 +92,13 @@ func rowFromSecret(s *secretmanagerpb.Secret) Row {
 		}
 	}
 
-	return Row{
-		ID:   s.Name, // projects/<p>/secrets/<name>
-		Type: RowTypeActive,
+	return dao.Row{
+		ID:   s.Name,
+		Type: dao.RowTypeActive,
 		Meta: map[string]string{
 			"name": name,
 		},
-		Columns: []Column{
+		Columns: []dao.Column{
 			{Text: name},
 			{Text: replication},
 			{Text: labels},
@@ -107,11 +108,7 @@ func rowFromSecret(s *secretmanagerpb.Secret) Row {
 }
 
 // AccessLatestSecret fetches the plaintext payload of the latest enabled
-// version of the given secret. Returns the raw bytes as a string.
-//
-// secretName must be the fully-qualified resource name:
-//
-//	projects/<project>/secrets/<name>
+// version of the given secret.
 func AccessLatestSecret(ctx context.Context, secretName string) (string, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {

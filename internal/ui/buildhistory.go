@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/buildhistory"
 	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -120,13 +121,13 @@ func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
 
 	// Bucket not populated yet — call GetBuild to resolve it.
 	go func() {
-		b, err := dao.GetBuild(v.app.ctx, project, buildID)
+		b, err := buildhistory.GetBuild(v.app.ctx, project, buildID)
 		if err != nil {
 			log.Error().Err(err).Str("buildId", buildID).Msg("build history: GetBuild failed")
 			return
 		}
 		resolvedMode := b.Options.GetLogging().String()
-		resolvedBucket := dao.LogsBucketForBuild(b)
+		resolvedBucket := buildhistory.LogsBucketForBuild(b)
 		resolvedCreate := createTime
 		if b.CreateTime != nil {
 			resolvedCreate = b.CreateTime.AsTime().UTC().Format("2006-01-02T15:04:05Z")
@@ -190,7 +191,7 @@ func (v *BuildHistoryView) cancelSelected() bool {
 	}
 
 	go func() {
-		if err := dao.CancelBuild(v.app.ctx, project, buildID); err != nil {
+		if err := buildhistory.CancelBuild(v.app.ctx, project, buildID); err != nil {
 			log.Error().Err(err).Str("buildId", buildID).Msg("build history: cancel failed")
 			return
 		}
@@ -235,8 +236,8 @@ func (v *BuildHistoryView) maybeLoadNextPage() {
 	project := v.project
 
 	go func() {
-		dao := new(dao.BuildHistory)
-		data, err := dao.NextPage(v.app.ctx, project, token, 10)
+		bh := new(buildhistory.BuildHistory)
+		data, err := bh.NextPage(v.app.ctx, project, token, 10)
 		if err != nil {
 			log.Error().Err(err).Msg("build history: next page failed")
 			v.app.tview.QueueUpdateDraw(func() { v.loading = false })

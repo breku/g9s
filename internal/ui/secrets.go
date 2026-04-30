@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/secrets"
 	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -82,7 +83,7 @@ func (v *SecretsView) viewSecret() bool {
 	title := fmt.Sprintf("Secret – %s", short)
 
 	dv := NewDescribeView(v.app, title, func(ctx context.Context) (string, error) {
-		return dao.AccessLatestSecret(ctx, name)
+		return secrets.AccessLatestSecret(ctx, name)
 	})
 	dv.EnableCopy("Copy value")
 	v.app.PushOverlay(dv)

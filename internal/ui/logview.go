@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/logs"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
@@ -246,7 +246,7 @@ func (lv *LogView) close() {
 }
 
 // streamCloudLogging fetches log entries from the Cloud Logging API via the
-// dao.FetchCloudLoggingPage function. Polls every 2s when Streaming is true.
+// logs.FetchCloudLoggingPage function. Polls every 2s when Streaming is true.
 // Uses desc-order initial fetch for speed, then asc polling with a timestamp cursor.
 func (lv *LogView) streamCloudLogging(ctx context.Context) {
 	pageSize := lv.cfg.LogPageSize
@@ -255,7 +255,7 @@ func (lv *LogView) streamCloudLogging(ctx context.Context) {
 	}
 
 	// --- Initial load: fetch desc, reversed — fast even on busy services ---
-	lines, pollSince, newestInsertID, err := dao.FetchCloudLoggingInitial(ctx, lv.cfg.Project, lv.cfg.LogFilter, lv.cfg.LogSince, pageSize)
+	lines, pollSince, newestInsertID, err := logs.FetchCloudLoggingInitial(ctx, lv.cfg.Project, lv.cfg.LogFilter, lv.cfg.LogSince, pageSize)
 	if err != nil && ctx.Err() == nil {
 		log.Error().Err(err).Str("title", lv.cfg.Title).Msg("logview: initial fetch")
 	}
@@ -284,7 +284,7 @@ func (lv *LogView) streamCloudLogging(ctx context.Context) {
 	lastInsertID := newestInsertID
 
 	poll := func() {
-		newLines, newLastID, newSince, pollErr := dao.FetchCloudLoggingPage(ctx, lv.cfg.Project, lv.cfg.LogFilter, since, lastInsertID)
+		newLines, newLastID, newSince, pollErr := logs.FetchCloudLoggingPage(ctx, lv.cfg.Project, lv.cfg.LogFilter, since, lastInsertID)
 		if pollErr != nil {
 			if ctx.Err() == nil {
 				log.Error().Err(pollErr).Str("title", lv.cfg.Title).Msg("logview: poll fetch")
@@ -316,7 +316,7 @@ func (lv *LogView) streamCloudLogging(ctx context.Context) {
 // fetch reads the entire GCS log object and writes it to the view.
 // Returns the total number of bytes read (0 if the object doesn't exist yet).
 func (lv *LogView) fetch(ctx context.Context) int64 {
-	buf, newOffset, err := dao.FetchGCSRange(ctx, lv.cfg.Bucket, lv.cfg.Object, 0)
+	buf, newOffset, err := logs.FetchGCSRange(ctx, lv.cfg.Bucket, lv.cfg.Object, 0)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotExist) {
 			lv.app.tview.QueueUpdateDraw(func() {
@@ -342,7 +342,7 @@ func (lv *LogView) fetch(ctx context.Context) int64 {
 // fetchFrom reads bytes starting at byteOffset and appends them to the view.
 // Returns the new offset after the read.
 func (lv *LogView) fetchFrom(ctx context.Context, byteOffset int64) int64 {
-	buf, newOffset, err := dao.FetchGCSRange(ctx, lv.cfg.Bucket, lv.cfg.Object, byteOffset)
+	buf, newOffset, err := logs.FetchGCSRange(ctx, lv.cfg.Bucket, lv.cfg.Object, byteOffset)
 	if err != nil || len(buf) == 0 {
 		return byteOffset
 	}

@@ -1,4 +1,5 @@
-package dao
+// Package vms provides the DAO for Compute Engine VM instances.
+package vms
 
 import (
 	"context"
@@ -8,13 +9,14 @@ import (
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
 	"google.golang.org/api/iterator"
 	"gopkg.in/yaml.v3"
 )
 
 // Ensure VMs satisfies Accessor at compile time.
-var _ Accessor = (*VMs)(nil)
+var _ dao.Accessor = (*VMs)(nil)
 
 // VMs is the DAO for Compute Engine VM instances.
 type VMs struct{}
@@ -27,9 +29,8 @@ func (v *VMs) Header() []string {
 	return []string{"NAME", "ZONE", "MACHINE TYPE", "STATUS", "INTERNAL IP", "EXTERNAL IP", "CREATED"}
 }
 
-// List fetches all Compute Engine instances across every zone in the project
-// using a single AggregatedList call.
-func (v *VMs) List(ctx context.Context, project string) (*TableData, error) {
+// List fetches all Compute Engine instances across every zone in the project.
+func (v *VMs) List(ctx context.Context, project string) (*dao.TableData, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("vms: credentials: %w", err)
@@ -43,7 +44,7 @@ func (v *VMs) List(ctx context.Context, project string) (*TableData, error) {
 
 	req := &computepb.AggregatedListInstancesRequest{Project: project}
 
-	var rows []Row
+	var rows []dao.Row
 	it := client.AggregatedList(ctx, req)
 	for {
 		pair, err := it.Next()
@@ -53,33 +54,27 @@ func (v *VMs) List(ctx context.Context, project string) (*TableData, error) {
 		if err != nil {
 			return nil, fmt.Errorf("vms: aggregated list: %w", err)
 		}
-		// pair.Key is the scope (e.g. "zones/us-central1-a"); pair.Value
-		// holds the instances list (or warning if zone has none).
 		for _, inst := range pair.Value.GetInstances() {
 			rows = append(rows, rowFromInstance(inst))
 		}
 	}
 
-	return &TableData{
+	return &dao.TableData{
 		Header: v.Header(),
 		Rows:   rows,
 	}, nil
 }
 
-// rowFromInstance converts a compute Instance proto to a table Row.
-func rowFromInstance(inst *computepb.Instance) Row {
+func rowFromInstance(inst *computepb.Instance) dao.Row {
 	name := inst.GetName()
-	zone := lastSegment(inst.GetZone())
-	machine := lastSegment(inst.GetMachineType())
-	status := inst.GetStatus() // e.g. "RUNNING", "TERMINATED", "STOPPING"
+	zone := dao.LastSegment(inst.GetZone())
+	machine := dao.LastSegment(inst.GetMachineType())
+	status := inst.GetStatus()
 
 	internalIP, externalIP := instanceIPs(inst)
 
-	// CreationTimestamp is an RFC3339 string in the API.
 	created := "—"
 	if ts := inst.GetCreationTimestamp(); ts != "" {
-		// Display the date+time portion without the timezone offset to keep
-		// the column narrow; full value is available via Describe.
 		if i := strings.Index(ts, "T"); i > 0 && len(ts) >= i+6 {
 			created = ts[:i] + " " + ts[i+1:i+6]
 		} else {
@@ -87,16 +82,15 @@ func rowFromInstance(inst *computepb.Instance) Row {
 		}
 	}
 
-	colType := RowTypeNotActive
+	colType := dao.RowTypeNotActive
 	switch status {
 	case "RUNNING":
-		colType = RowTypeActive
+		colType = dao.RowTypeActive
 	case "STOPPING", "SUSPENDING", "REPAIRING":
-		colType = RowTypeError
+		colType = dao.RowTypeError
 	}
 
-	return Row{
-		// Use the self link as a stable, fully-qualified ID.
+	return dao.Row{
 		ID:   inst.GetSelfLink(),
 		Type: colType,
 		Meta: map[string]string{
@@ -106,7 +100,7 @@ func rowFromInstance(inst *computepb.Instance) Row {
 			"internalIP": internalIP,
 			"externalIP": externalIP,
 		},
-		Columns: []Column{
+		Columns: []dao.Column{
 			{Text: name},
 			{Text: zone},
 			{Text: machine},
@@ -118,8 +112,6 @@ func rowFromInstance(inst *computepb.Instance) Row {
 	}
 }
 
-// instanceIPs returns the first internal and external IPv4 address found on
-// the instance's network interfaces.
 func instanceIPs(inst *computepb.Instance) (internal, external string) {
 	for _, nic := range inst.GetNetworkInterfaces() {
 		if internal == "" {
@@ -147,7 +139,6 @@ func orDash(s string) string {
 	return s
 }
 
-// getInstance fetches a single Compute Engine instance.
 func getInstance(ctx context.Context, project, zone, name string) (*computepb.Instance, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
@@ -184,7 +175,6 @@ func DescribeVMYAML(ctx context.Context, project, zone, name string) (string, er
 	if err != nil {
 		return "", err
 	}
-	// proto → JSON (preserves field names) → generic map → YAML.
 	jsonBytes, err := json.Marshal(inst)
 	if err != nil {
 		return "", fmt.Errorf("vms: marshal json: %w", err)
@@ -200,9 +190,8 @@ func DescribeVMYAML(ctx context.Context, project, zone, name string) (string, er
 	return string(yamlBytes), nil
 }
 
-// DeleteVM issues a delete on the given Compute Engine instance. It returns
-// as soon as the API accepts the request — it does NOT wait for the LRO to
-// finish. The polling loop will reflect the new state on the next tick.
+// DeleteVM issues a delete on the given Compute Engine instance.
+// Returns as soon as the API accepts the request — does NOT wait for the LRO.
 func DeleteVM(ctx context.Context, project, zone, name string) error {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
@@ -212,7 +201,6 @@ func DeleteVM(ctx context.Context, project, zone, name string) error {
 	if err != nil {
 		return fmt.Errorf("vms: new client: %w", err)
 	}
-	// client closed below once the API call returns; we don't wait on the LRO.
 
 	if _, err := client.Delete(ctx, &computepb.DeleteInstanceRequest{
 		Project:  project,

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/cloudbuild"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
@@ -134,7 +134,7 @@ func (ro *RunOverlay) Hints() []Hint {
 // no-op — the user drives everything via key presses.
 func (ro *RunOverlay) Start(_ context.Context) {}
 
-// submit reads the branch, calls dao.RunTrigger, and shows the result.
+// submit reads the branch, calls cloudbuild.RunTrigger, and shows the result.
 // Called from the InputField's DoneFunc — already on the main tview goroutine.
 func (ro *RunOverlay) submit() {
 	branch := ro.input.GetText()
@@ -148,7 +148,7 @@ func (ro *RunOverlay) submit() {
 	ro.input.SetDisabled(true)
 
 	go func() {
-		err := dao.RunTrigger(ro.app.ctx, ro.project, ro.triggerID, branch)
+		err := cloudbuild.RunTrigger(ro.app.ctx, ro.project, ro.triggerID, branch)
 		if err != nil {
 			log.Error().Err(err).Str("trigger", ro.triggerID).Msg("run overlay: trigger failed")
 			ro.app.tview.QueueUpdateDraw(func() {

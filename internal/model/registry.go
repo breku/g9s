@@ -5,7 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/buildhistory"
+	"github.com/brekol/g9s/internal/dao/cloudbuild"
+	"github.com/brekol/g9s/internal/dao/cloudrun"
+	"github.com/brekol/g9s/internal/dao/secrets"
+	"github.com/brekol/g9s/internal/dao/vms"
 )
 
 // Registry maps resource identifiers to their ResourceMeta.
@@ -18,11 +22,11 @@ import (
 //   - The cost/quota weight of the List API call.
 //   - User expectation of how "live" the data should feel.
 var Registry = map[string]ResourceMeta{
-	"cloudrun":     {DAO: new(dao.CloudRun), TTL: 30 * time.Second},
-	"cloudbuild":   {DAO: new(dao.CloudBuild), TTL: 30 * time.Second},
-	"buildhistory": {DAO: new(dao.BuildHistory), TTL: 5 * time.Second},
-	"vms":          {DAO: new(dao.VMs), TTL: 30 * time.Second},
-	"secrets":      {DAO: new(dao.Secrets), TTL: 60 * time.Second},
+	"cloudrun":     {DAO: new(cloudrun.CloudRun), TTL: 30 * time.Second},
+	"cloudbuild":   {DAO: new(cloudbuild.CloudBuild), TTL: 30 * time.Second},
+	"buildhistory": {DAO: new(buildhistory.BuildHistory), TTL: 5 * time.Second},
+	"vms":          {DAO: new(vms.VMs), TTL: 30 * time.Second},
+	"secrets":      {DAO: new(secrets.Secrets), TTL: 60 * time.Second},
 }
 
 // Aliases maps shorthand command names to canonical registry keys.

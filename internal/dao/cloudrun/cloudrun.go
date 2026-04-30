@@ -1,4 +1,5 @@
-package dao
+// Package cloudrun provides the DAO for Cloud Run v2 services.
+package cloudrun
 
 import (
 	"context"
@@ -8,6 +9,7 @@ import (
 
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
+	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -15,7 +17,7 @@ import (
 )
 
 // Ensure CloudRun satisfies Accessor at compile time.
-var _ Accessor = (*CloudRun)(nil)
+var _ dao.Accessor = (*CloudRun)(nil)
 
 // CloudRun is the DAO for Cloud Run v2 Services.
 type CloudRun struct{}
@@ -29,7 +31,7 @@ func (c *CloudRun) Header() []string {
 }
 
 // List fetches all Cloud Run services across all regions in the given project.
-func (c *CloudRun) List(ctx context.Context, project string) (*TableData, error) {
+func (c *CloudRun) List(ctx context.Context, project string) (*dao.TableData, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cloudrun: credentials: %w", err)
@@ -46,7 +48,7 @@ func (c *CloudRun) List(ctx context.Context, project string) (*TableData, error)
 		Parent: fmt.Sprintf("projects/%s/locations/-", project),
 	}
 
-	var rows []Row
+	var rows []dao.Row
 	it := client.ListServices(ctx, req)
 	for {
 		svc, err := it.Next()
@@ -59,38 +61,38 @@ func (c *CloudRun) List(ctx context.Context, project string) (*TableData, error)
 		rows = append(rows, rowFromService(svc))
 	}
 
-	return &TableData{
+	return &dao.TableData{
 		Header: c.Header(),
 		Rows:   rows,
 	}, nil
 }
 
 // rowFromService converts a Cloud Run Service proto to a table Row.
-func rowFromService(svc *runpb.Service) Row {
-	name := lastSegment(svc.Name)
+func rowFromService(svc *runpb.Service) dao.Row {
+	name := dao.LastSegment(svc.Name)
 	region := locationFromName(svc.Name)
 	status := conditionState(svc.TerminalCondition)
 	url := svc.Uri
-	deployed := formatTime(svc.UpdateTime.AsTime())
+	deployed := dao.FormatTime(svc.UpdateTime.AsTime())
 	deployedBy := svc.LastModifier
 	if deployedBy == "" {
 		deployedBy = "—"
 	}
 
-	colType := RowTypeNotActive
+	colType := dao.RowTypeNotActive
 	if status == "Ready" {
-		colType = RowTypeActive
+		colType = dao.RowTypeActive
 	} else if status == "Failed" {
-		colType = RowTypeError
+		colType = dao.RowTypeError
 	}
 
-	return Row{
+	return dao.Row{
 		ID:   svc.Name,
 		Type: colType,
 		Meta: map[string]string{
 			"url": url,
 		},
-		Columns: []Column{
+		Columns: []dao.Column{
 			{Text: name},
 			{Text: region},
 			{Text: status},
@@ -105,7 +107,6 @@ func rowFromService(svc *runpb.Service) Row {
 // Format: projects/{p}/locations/{location}/services/{service}
 func locationFromName(name string) string {
 	parts := strings.Split(name, "/")
-	// index 3 is the location value
 	if len(parts) >= 4 {
 		return parts[3]
 	}
@@ -164,7 +165,6 @@ func DescribeYAML(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// proto → compact JSON → map → YAML
 	jsonBytes, err := protojson.MarshalOptions{}.Marshal(svc)
 	if err != nil {
 		return "", fmt.Errorf("cloudrun: marshal json: %w", err)
@@ -188,7 +188,6 @@ func DescribeYAML(ctx context.Context, name string) (string, error) {
 // wait for the long-running deploy to finish. Callers that need the final
 // outcome should observe the next poll tick.
 func UpdateServiceFromYAML(ctx context.Context, yamlStr string) error {
-	// YAML → generic map → JSON → protojson → Service proto.
 	var m interface{}
 	if err := yaml.Unmarshal([]byte(yamlStr), &m); err != nil {
 		return fmt.Errorf("cloudrun: parse yaml: %w", err)
@@ -213,17 +212,14 @@ func UpdateServiceFromYAML(ctx context.Context, yamlStr string) error {
 	if err != nil {
 		return fmt.Errorf("cloudrun: new client: %w", err)
 	}
-	// Note: client is closed by the goroutine below once the LRO settles.
 
 	_, err = client.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc})
 	if err != nil {
 		_ = client.Close()
 		return fmt.Errorf("cloudrun: update: %w", err)
 	}
-	// We intentionally do NOT wait for the LRO — Cloud Run deploys can take
-	// minutes and we don't want to block the UI. The polling loop will
-	// reflect the new state on the next tick. We still need to close the
-	// client eventually; do it in a goroutine that survives this call.
+	// Don't wait for the LRO — Cloud Run deploys can take minutes. Polling
+	// loop will reflect new state on next tick. Close client in goroutine.
 	go func() {
 		_ = client.Close()
 	}()

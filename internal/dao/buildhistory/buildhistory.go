@@ -1,4 +1,5 @@
-package dao
+// Package buildhistory provides the DAO for Cloud Build build executions.
+package buildhistory
 
 import (
 	"context"
@@ -9,6 +10,7 @@ import (
 
 	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/api/iterator"
@@ -37,8 +39,6 @@ func CancelBuild(ctx context.Context, project, buildID string) error {
 }
 
 // GetBuild fetches a single build by project and build ID.
-// Returns the build proto with the most up-to-date fields, including
-// LogsBucket which may be empty on very early-stage builds.
 func GetBuild(ctx context.Context, project, buildID string) (*cloudbuildpb.Build, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
@@ -58,14 +58,11 @@ func GetBuild(ctx context.Context, project, buildID string) (*cloudbuildpb.Build
 
 // LogsBucketForBuild returns the GCS bucket name (without gs:// prefix) for
 // a build's logs. It uses the build's LogsBucket field when set, and falls
-// back to deriving the default bucket from the LogUrl (which encodes the
-// project number) for builds that are still starting up.
+// back to deriving the default bucket from the LogUrl.
 func LogsBucketForBuild(b *cloudbuildpb.Build) string {
 	if b.LogsBucket != "" {
 		return strings.TrimPrefix(b.LogsBucket, "gs://")
 	}
-	// LogUrl format: https://console.cloud.google.com/cloud-build/builds/<id>?project=<projectNumber>
-	// Default bucket: <projectNumber>.cloudbuild-logs.googleusercontent.com
 	if b.LogUrl != "" {
 		if idx := strings.Index(b.LogUrl, "?project="); idx != -1 {
 			projectNumber := b.LogUrl[idx+len("?project="):]
@@ -79,8 +76,8 @@ func LogsBucketForBuild(b *cloudbuildpb.Build) string {
 
 // Ensure BuildHistory satisfies Accessor and Paginator at compile time.
 var (
-	_ Accessor  = (*BuildHistory)(nil)
-	_ Paginator = (*BuildHistory)(nil)
+	_ dao.Accessor  = (*BuildHistory)(nil)
+	_ dao.Paginator = (*BuildHistory)(nil)
 )
 
 const buildHistoryPageSize = 10
@@ -97,13 +94,13 @@ func (b *BuildHistory) Header() []string {
 }
 
 // List fetches the first page of builds (10 most recent).
-func (b *BuildHistory) List(ctx context.Context, project string) (*TableData, error) {
+func (b *BuildHistory) List(ctx context.Context, project string) (*dao.TableData, error) {
 	return b.NextPage(ctx, project, "", buildHistoryPageSize)
 }
 
 // NextPage fetches a page of builds using the given page token.
 // An empty pageToken fetches the first page.
-func (b *BuildHistory) NextPage(ctx context.Context, project, pageToken string, pageSize int) (*TableData, error) {
+func (b *BuildHistory) NextPage(ctx context.Context, project, pageToken string, pageSize int) (*dao.TableData, error) {
 	opts, err := gcp.ClientOptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildhistory: credentials: %w", err)
@@ -121,9 +118,8 @@ func (b *BuildHistory) NextPage(ctx context.Context, project, pageToken string, 
 		PageToken: pageToken,
 	}
 
-	var rows []Row
+	var rows []dao.Row
 	it := client.ListBuilds(ctx, req)
-	// Fetch exactly one page — call it.Next() up to pageSize times, then stop.
 	for i := 0; i < pageSize; i++ {
 		build, err := it.Next()
 		if err == iterator.Done {
@@ -135,7 +131,6 @@ func (b *BuildHistory) NextPage(ctx context.Context, project, pageToken string, 
 		rows = append(rows, rowFromBuild(build))
 	}
 
-	// Peek at the next page token from the iterator's internal pager.
 	nextToken := it.PageInfo().Token
 
 	log.Debug().
@@ -145,15 +140,14 @@ func (b *BuildHistory) NextPage(ctx context.Context, project, pageToken string, 
 		Str("nextToken", nextToken).
 		Msg("page fetched")
 
-	return &TableData{
+	return &dao.TableData{
 		Header:        b.Header(),
 		Rows:          rows,
 		NextPageToken: nextToken,
 	}, nil
 }
 
-// rowFromBuild converts a Build proto to a table Row.
-func rowFromBuild(b *cloudbuildpb.Build) Row {
+func rowFromBuild(b *cloudbuildpb.Build) dao.Row {
 	id := b.Id
 	if len(id) > 8 {
 		id = id[:8]
@@ -165,26 +159,25 @@ func rowFromBuild(b *cloudbuildpb.Build) Row {
 	} else if len(trigger) > 8 {
 		trigger = trigger[:8]
 	}
-	// Use substitution _TRIGGER_NAME if available.
 	if name, ok := b.Substitutions["TRIGGER_NAME"]; ok && name != "" {
 		trigger = name
 	}
 
 	status := buildStatus(b.Status)
 
-	rowType := RowTypeNotActive
+	rowType := dao.RowTypeNotActive
 	switch status {
 	case "Working", "Queued", "Pending":
-		rowType = RowTypeActive
+		rowType = dao.RowTypeActive
 	case "Failure", "Internal Error", "Expired", "Timeout":
-		rowType = RowTypeError
+		rowType = dao.RowTypeError
 	}
 
 	started := "—"
 	if b.StartTime != nil {
-		started = formatTime(b.StartTime.AsTime())
+		started = dao.FormatTime(b.StartTime.AsTime())
 	} else if b.CreateTime != nil {
-		started = formatTime(b.CreateTime.AsTime())
+		started = dao.FormatTime(b.CreateTime.AsTime())
 	}
 
 	duration := buildDuration(b)
@@ -201,10 +194,10 @@ func rowFromBuild(b *cloudbuildpb.Build) Row {
 		createTime = b.CreateTime.AsTime().UTC().Format(time.RFC3339)
 	}
 
-	return Row{
+	return dao.Row{
 		ID:   b.Name,
 		Type: rowType,
-		Columns: []Column{
+		Columns: []dao.Column{
 			{Text: id},
 			{Text: trigger},
 			{Text: status},
@@ -225,7 +218,6 @@ func rowFromBuild(b *cloudbuildpb.Build) Row {
 	}
 }
 
-// buildStatus maps Build_Status to a human-readable string.
 func buildStatus(s cloudbuildpb.Build_Status) string {
 	switch s {
 	case cloudbuildpb.Build_SUCCESS:
@@ -251,7 +243,6 @@ func buildStatus(s cloudbuildpb.Build_Status) string {
 	}
 }
 
-// buildDuration computes a human-readable duration from start to finish.
 func buildDuration(b *cloudbuildpb.Build) string {
 	if b.StartTime == nil {
 		return "—"
@@ -278,7 +269,6 @@ func buildDuration(b *cloudbuildpb.Build) string {
 	return fmt.Sprintf("%dh%dm", h, m)
 }
 
-// buildBranch extracts the branch name from the build source.
 func buildBranch(b *cloudbuildpb.Build) string {
 	if b.Source != nil {
 		if rs := b.Source.GetRepoSource(); rs != nil {
@@ -290,7 +280,6 @@ func buildBranch(b *cloudbuildpb.Build) string {
 			}
 		}
 	}
-	// Fallback: check substitutions.
 	if br, ok := b.Substitutions["BRANCH_NAME"]; ok && br != "" {
 		return br
 	}
@@ -300,14 +289,12 @@ func buildBranch(b *cloudbuildpb.Build) string {
 	return "—"
 }
 
-// buildImages returns a comma-separated list of image names (short form).
 func buildImages(b *cloudbuildpb.Build) string {
 	if len(b.Images) == 0 {
 		return "—"
 	}
 	short := make([]string, len(b.Images))
 	for i, img := range b.Images {
-		// Take just the image name after the last '/'.
 		parts := strings.Split(img, "/")
 		short[i] = parts[len(parts)-1]
 	}
