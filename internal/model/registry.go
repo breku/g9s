@@ -32,11 +32,7 @@ var Aliases = map[string]string{
 	"triggers":     "cloudbuild",
 	"buildhistory": "buildhistory",
 	"vms":          "vms",
-	"vm":           "vms",
-	"instances":    "vms",
 	"secrets":      "secrets",
-	"secret":       "secrets",
-	"sm":           "secrets",
 	"q":            "_quit",
 	"quit":         "_quit",
 }
