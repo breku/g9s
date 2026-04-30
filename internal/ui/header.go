@@ -12,7 +12,7 @@ import (
 var globalHints = []Hint{
 	{Key: ":", Desc: "command"},
 	{Key: "/", Desc: "filter"},
-	{Key: "q", Desc: "quit"},
+	{Key: ":q", Desc: "quit"},
 }
 
 // Header is the 3-row, 3-column bar at the top of the app.

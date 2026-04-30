@@ -85,9 +85,6 @@ func New(cfg *config.Config) *App {
 		}
 
 		switch event.Rune() {
-		case 'q':
-			a.stop()
-			return nil
 		case ':':
 			a.showCmdBar(modeCommand)
 			return nil
@@ -99,9 +96,12 @@ func New(cfg *config.Config) *App {
 			a.stop()
 			return nil
 		}
-		// Generic cross-resource keys (d, y, c) handled centrally so each
+		// Generic cross-resource keys (y, c) handled centrally so each
 		// view doesn't reimplement them. Runs before the view's own
-		// KeyHandler so views can't accidentally shadow them.
+		// KeyHandler so views can't accidentally shadow them. Note: 'q'
+		// is intentionally NOT a global quit — Ctrl-C is the only quit
+		// binding. Overlays may still bind 'q' locally for their own
+		// dismiss UX. Esc has no global handler — overlays consume it.
 		if a.activeOverlay == nil && a.activeView != nil {
 			if handleGenericKey(a, a.activeView, event) {
 				return nil
