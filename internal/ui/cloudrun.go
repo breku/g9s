@@ -1,26 +1,26 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"time"
 
-	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/dao/cloudrun"
-	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 )
 
 // CloudRunView is the tview page for Cloud Run services.
+//
+// Lifecycle, rendering, model wiring, and Filterable/ResourceView/TableListener
+// glue all come from the embedded *ResourceTable. Only resource-specific
+// concerns live here: the typed DAO reference (so handlers can call
+// service-specific methods), key bindings, hints, and the edit/log actions.
 type CloudRunView struct {
 	*ResourceTable
 
 	app     *App
 	project string
-	mdl     *model.Table
 	dao     *cloudrun.CloudRun
 }
 
@@ -33,39 +33,13 @@ var (
 
 // NewCloudRunView creates a CloudRunView for the given project.
 func NewCloudRunView(a *App, project string) *CloudRunView {
-	v := &CloudRunView{
-		ResourceTable: NewResourceTable(a, "Cloud Run"),
+	d := new(cloudrun.CloudRun)
+	return &CloudRunView{
+		ResourceTable: NewResourceView(a, project, "cloudrun", "Cloud Run", "Cloud Run services", d, 0),
 		app:           a,
 		project:       project,
-		mdl:           model.NewTable("cloudrun", project),
-		dao:           new(cloudrun.CloudRun),
+		dao:           d,
 	}
-	v.mdl.AddListener(v)
-	return v
-}
-
-// Primitive implements ResourceView.
-func (v *CloudRunView) Primitive() tview.Primitive { return v.Table }
-
-// Watch implements ResourceView.
-func (v *CloudRunView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
-
-// Stop implements ResourceView.
-func (v *CloudRunView) Stop() { v.mdl.Stop() }
-
-// DAO implements ResourceView.
-func (v *CloudRunView) DAO() dao.Accessor { return v.dao }
-
-// RenderLoading implements ResourceView.
-func (v *CloudRunView) RenderLoading() {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(" Loading Cloud Run services… ").
-		SetSelectable(false))
-}
-
-// SetFilter implements Filterable.
-func (v *CloudRunView) SetFilter(f string) {
-	v.ResourceTable.SetFilter(f)
 }
 
 // Hints implements HintProvider. Returns only resource-specific bindings;

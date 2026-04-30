@@ -4,19 +4,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/dao/secrets"
-	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 )
 
 // SecretsView is the tview page for GCP Secret Manager secrets.
+//
+// All lifecycle, rendering, and Filterable/ResourceView/TableListener glue is
+// inherited from the embedded *ResourceTable.
 type SecretsView struct {
 	*ResourceTable
 
 	app *App
-	mdl *model.Table
 	dao *secrets.Secrets
 }
 
@@ -28,38 +27,12 @@ var (
 
 // NewSecretsView creates a SecretsView for the given project.
 func NewSecretsView(a *App, project string) *SecretsView {
-	v := &SecretsView{
-		ResourceTable: NewResourceTable(a, "Secrets"),
+	d := new(secrets.Secrets)
+	return &SecretsView{
+		ResourceTable: NewResourceView(a, project, "secrets", "Secrets", "secrets", d, 0),
 		app:           a,
-		mdl:           model.NewTable("secrets", project),
-		dao:           new(secrets.Secrets),
+		dao:           d,
 	}
-	v.mdl.AddListener(v)
-	return v
-}
-
-// Primitive implements ResourceView.
-func (v *SecretsView) Primitive() tview.Primitive { return v.Table }
-
-// Watch implements ResourceView.
-func (v *SecretsView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
-
-// Stop implements ResourceView.
-func (v *SecretsView) Stop() { v.mdl.Stop() }
-
-// DAO implements ResourceView.
-func (v *SecretsView) DAO() dao.Accessor { return v.dao }
-
-// RenderLoading implements ResourceView.
-func (v *SecretsView) RenderLoading() {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(" Loading secrets… ").
-		SetSelectable(false))
-}
-
-// SetFilter implements Filterable.
-func (v *SecretsView) SetFilter(f string) {
-	v.ResourceTable.SetFilter(f)
 }
 
 // Hints implements HintProvider.
@@ -97,6 +70,3 @@ func (v *SecretsView) viewSecret() bool {
 	v.app.PushOverlay(dv)
 	return true
 }
-
-// TableDataChanged / TableLoadFailed are inherited from the embedded
-// *ResourceTable, which schedules repaints on the tview main goroutine.

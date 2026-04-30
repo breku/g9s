@@ -51,6 +51,11 @@ func (t *Table) AddListener(l TableListener) {
 	t.listeners = append(t.listeners, l)
 }
 
+// Project returns the GCP project this table is bound to. Used by callers
+// that need to invoke project-scoped DAO methods (e.g. Paginator.NextPage)
+// without separately tracking the project.
+func (t *Table) Project() string { return t.project }
+
 // Watch performs an immediate refresh and then polls on the resource's
 // configured RefreshRate until the derived context is cancelled.
 //

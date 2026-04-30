@@ -1,28 +1,54 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/rs/zerolog/log"
 )
 
-// ResourceTable is a reusable tview.Table wrapper that renders dao.TableData.
-// It stores the last-received data so it can re-render when the filter changes
-// without waiting for the next model poll.
+// ResourceTable is a reusable tview.Table wrapper that owns a model.Table and
+// renders dao.TableData. It encapsulates the entire "show this resource as a
+// scrollable table" pattern so per-resource view types only need to add their
+// own key handlers, hints, and resource-specific actions.
 //
-// ResourceTable also implements model.TableListener so simple resource views
-// can embed it and inherit the standard "render or show error" glue without
-// reimplementing TableDataChanged / TableLoadFailed in every view. Views that
-// need custom behaviour (e.g. accumulating pages) can shadow these methods —
-// Go's method resolution picks the outer type's implementation when present.
+// Responsibilities:
+//   - Renders dao.TableData with header, row colouring, and live filtering.
+//   - Implements model.TableListener (TableDataChanged / TableLoadFailed) so
+//     model updates flow into the table without per-view boilerplate.
+//   - Implements ResourceView (Primitive / Watch / Stop / DAO / RenderLoading)
+//     so the App can drive any embedded view through a single interface.
+//   - Optional cursor-based pagination: when pageSize > 0 the embedded view
+//     accumulates rows across pages and a PageDown press triggers
+//     dao.Paginator.NextPage. A "↓ PageDown to load more…" hint row is
+//     appended when more pages are available.
+//
+// Concurrency: all state mutation happens on the tview main goroutine. The
+// model.TableListener callbacks dispatch onto the UI via app.runOnUI; the
+// pagination next-page fetch runs in its own goroutine and re-enters via
+// app.runOnUI to apply results.
 type ResourceTable struct {
 	*tview.Table
 
-	app      *App
-	title    string // resource label shown in the border, e.g. "Cloud Run"
+	app          *App
+	title        string       // resource label shown in the border, e.g. "Cloud Run"
+	loadingLabel string       // shown by RenderLoading; "" suppresses the message entirely
+	accessor     dao.Accessor // returned by DAO(); also tested for dao.Paginator when pageSize > 0
+	mdl          *model.Table
+
+	// --- pagination state (zero-valued when pageSize == 0) ---
+	pageSize    int
+	allRows     []dao.Row
+	nextCursor  string
+	lastHeader  []string
+	loadingPage bool
+
+	// --- render state ---
 	lastData *dao.TableData
 	filter   string
 
@@ -31,10 +57,48 @@ type ResourceTable struct {
 	rowIndex []dao.Row
 }
 
-// NewResourceTable creates a ResourceTable with standard styling. The app
-// reference is required so the embedded TableListener methods can dispatch
-// repaints onto the tview main goroutine via QueueUpdateDraw.
+// NewResourceTable creates a non-paginated ResourceTable. Use this for views
+// that just need rendering and have no associated model (rare); most callers
+// should use NewResourceView instead.
 func NewResourceTable(app *App, title string) *ResourceTable {
+	return newResourceTable(app, title, "", nil, nil, 0)
+}
+
+// NewResourceView builds a ResourceTable wired to a model.Table and DAO,
+// returning a ready-to-embed component. The constructed table registers
+// itself as the model.TableListener, so the embedding view inherits Watch /
+// Stop / TableDataChanged / TableLoadFailed without writing any glue.
+//
+// Arguments:
+//   - app, project: standard plumbing.
+//   - resourceKey:  the registry key passed to model.NewTable (e.g. "cloudrun").
+//   - title:        border label.
+//   - loadingLabel: text shown by RenderLoading; pass "" to suppress entirely.
+//   - accessor:     the typed DAO; embedded views typically also keep their
+//     own typed reference for resource-specific calls.
+//   - pageSize:     0 disables pagination; >0 enables cursor-based accumulation.
+//     When >0, accessor MUST implement dao.Paginator.
+func NewResourceView(
+	app *App,
+	project, resourceKey, title, loadingLabel string,
+	accessor dao.Accessor,
+	pageSize int,
+) *ResourceTable {
+	mdl := model.NewTable(resourceKey, project)
+	rt := newResourceTable(app, title, loadingLabel, accessor, mdl, pageSize)
+	mdl.AddListener(rt)
+	return rt
+}
+
+// newResourceTable is the shared constructor used by both NewResourceTable
+// and NewResourceView.
+func newResourceTable(
+	app *App,
+	title, loadingLabel string,
+	accessor dao.Accessor,
+	mdl *model.Table,
+	pageSize int,
+) *ResourceTable {
 	t := tview.NewTable().
 		SetBorders(false).
 		SetSelectable(true, false). // row-selection mode
@@ -46,18 +110,81 @@ func NewResourceTable(app *App, title string) *ResourceTable {
 	t.SetTitleColor(AppTheme.TableTitleColor)
 	t.SetTitleAlign(tview.AlignCenter)
 
-	return &ResourceTable{Table: t, app: app, title: title}
+	rt := &ResourceTable{
+		Table:        t,
+		app:          app,
+		title:        title,
+		loadingLabel: loadingLabel,
+		accessor:     accessor,
+		mdl:          mdl,
+		pageSize:     pageSize,
+	}
+
+	// Wire PageDown to next-page fetch when paginated. We chain a wrapping
+	// input capture so the table's own scrolling still happens.
+	if pageSize > 0 {
+		t.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			if event.Key() == tcell.KeyPgDn {
+				rt.maybeLoadNextPage()
+			}
+			return event
+		})
+	}
+
+	return rt
 }
 
-// TableDataChanged implements model.TableListener. Schedules a repaint with
-// the new data on the tview main goroutine. Views that need to mutate the
-// data (e.g. accumulate pages) should shadow this method on the outer type.
+// Primitive implements ResourceView.
+func (r *ResourceTable) Primitive() tview.Primitive { return r.Table }
+
+// Watch implements ResourceView. No-op when this ResourceTable has no model
+// (i.e. constructed via NewResourceTable rather than NewResourceView).
+func (r *ResourceTable) Watch(ctx context.Context) error {
+	if r.mdl == nil {
+		return nil
+	}
+	return r.mdl.Watch(ctx)
+}
+
+// Stop implements ResourceView. No-op when this ResourceTable has no model.
+func (r *ResourceTable) Stop() {
+	if r.mdl != nil {
+		r.mdl.Stop()
+	}
+}
+
+// DAO implements ResourceView.
+func (r *ResourceTable) DAO() dao.Accessor { return r.accessor }
+
+// RenderLoading implements ResourceView. Shows " Loading <loadingLabel>… "
+// in the first cell when loadingLabel is set; otherwise just clears the table.
+func (r *ResourceTable) RenderLoading() {
+	r.Clear()
+	if r.loadingLabel == "" {
+		return
+	}
+	r.SetCell(0, 0, tview.NewTableCell(fmt.Sprintf(" Loading %s… ", r.loadingLabel)).
+		SetSelectable(false))
+}
+
+// TableDataChanged implements model.TableListener. In non-paginated mode it
+// replaces the rendered data wholesale. In paginated mode it resets the
+// accumulator to the freshly-polled first page (this is what happens on every
+// poll tick, so the table stays in sync with server-side changes).
 func (r *ResourceTable) TableDataChanged(data *dao.TableData) {
-	r.app.runOnUI(func() { r.Render(data) })
+	r.app.runOnUI(func() {
+		if r.pageSize > 0 {
+			r.allRows = data.Rows
+			r.nextCursor = data.NextPageToken
+			r.lastHeader = data.Header
+			r.renderAccumulated()
+			return
+		}
+		r.Render(data)
+	})
 }
 
-// TableLoadFailed implements model.TableListener. Schedules an error render
-// on the tview main goroutine.
+// TableLoadFailed implements model.TableListener.
 func (r *ResourceTable) TableLoadFailed(err error) {
 	r.app.runOnUI(func() { r.renderError(err) })
 }
@@ -95,6 +222,62 @@ func (r *ResourceTable) SelectedRow() dao.Row {
 		return nil
 	}
 	return r.rowIndex[idx]
+}
+
+// maybeLoadNextPage fetches the next page in the background and appends rows.
+// No-op when there is no next page, a fetch is already in flight, the
+// accessor doesn't implement dao.Paginator, or pagination is disabled.
+// Must be called on the tview main goroutine (e.g. from an input capture).
+func (r *ResourceTable) maybeLoadNextPage() {
+	if r.pageSize <= 0 || r.nextCursor == "" || r.loadingPage {
+		return
+	}
+	pager, ok := r.accessor.(dao.Paginator)
+	if !ok {
+		return
+	}
+	r.loadingPage = true
+
+	cursor := r.nextCursor
+	pageSize := r.pageSize
+	project := ""
+	if r.mdl != nil {
+		project = r.mdl.Project()
+	}
+
+	go func() {
+		data, err := pager.NextPage(r.app.ctx, project, cursor, pageSize)
+		if err != nil {
+			log.Error().Err(err).Str("title", r.title).Msg("resource table: next page failed")
+			r.app.runOnUI(func() { r.loadingPage = false })
+			return
+		}
+		r.app.runOnUI(func() {
+			r.loadingPage = false
+			r.allRows = append(r.allRows, data.Rows...)
+			r.nextCursor = data.NextPageToken
+			if r.lastHeader == nil {
+				r.lastHeader = data.Header
+			}
+			r.renderAccumulated()
+		})
+	}()
+}
+
+// renderAccumulated repaints the table from the accumulated rows and appends
+// a "PageDown to load more…" hint when more pages are available.
+// Must be called on the tview main goroutine.
+func (r *ResourceTable) renderAccumulated() {
+	r.Render(&dao.TableData{
+		Header:        r.lastHeader,
+		Rows:          r.allRows,
+		NextPageToken: r.nextCursor,
+	})
+	if r.nextCursor != "" && !r.loadingPage {
+		rowIdx := r.Table.GetRowCount()
+		r.Table.SetCell(rowIdx, 0, tview.NewTableCell(" [darkgray]↓ PageDown to load more… ").
+			SetSelectable(false))
+	}
 }
 
 // repaint redraws the table from lastData, applying the current filter.

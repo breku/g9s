@@ -81,7 +81,9 @@ var (
 	_ dao.Row       = (*BuildRow)(nil)
 )
 
-const buildHistoryPageSize = 10
+// PageSize is the number of builds fetched per page. Exported so the UI
+// layer can pass it to the paginated ResourceTable constructor.
+const PageSize = 10
 
 // BuildHistory is the DAO for Cloud Build build executions (history).
 type BuildHistory struct{}
@@ -138,7 +140,7 @@ func (b *BuildHistory) Header() []string {
 
 // List fetches the first page of builds (10 most recent).
 func (b *BuildHistory) List(ctx context.Context, project string) (*dao.TableData, error) {
-	return b.NextPage(ctx, project, "", buildHistoryPageSize)
+	return b.NextPage(ctx, project, "", PageSize)
 }
 
 // NextPage fetches a page of builds using the given page token.

@@ -5,19 +5,19 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/dao/vms"
-	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 )
 
 // VMsView is the tview page for Compute Engine VM instances.
+//
+// All lifecycle, rendering, and Filterable/ResourceView/TableListener glue is
+// inherited from the embedded *ResourceTable; only resource-specific concerns
+// (typed DAO, key bindings, hints, delete/log actions) live here.
 type VMsView struct {
 	*ResourceTable
 
 	app *App
-	mdl *model.Table
 	dao *vms.VMs
 }
 
@@ -30,38 +30,12 @@ var (
 
 // NewVMsView creates a VMsView for the given project.
 func NewVMsView(a *App, project string) *VMsView {
-	v := &VMsView{
-		ResourceTable: NewResourceTable(a, "VMs"),
+	d := new(vms.VMs)
+	return &VMsView{
+		ResourceTable: NewResourceView(a, project, "vms", "VMs", "VM instances", d, 0),
 		app:           a,
-		mdl:           model.NewTable("vms", project),
-		dao:           new(vms.VMs),
+		dao:           d,
 	}
-	v.mdl.AddListener(v)
-	return v
-}
-
-// Primitive implements ResourceView.
-func (v *VMsView) Primitive() tview.Primitive { return v.Table }
-
-// Watch implements ResourceView.
-func (v *VMsView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
-
-// Stop implements ResourceView.
-func (v *VMsView) Stop() { v.mdl.Stop() }
-
-// DAO implements ResourceView.
-func (v *VMsView) DAO() dao.Accessor { return v.dao }
-
-// RenderLoading implements ResourceView.
-func (v *VMsView) RenderLoading() {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(" Loading VM instances… ").
-		SetSelectable(false))
-}
-
-// SetFilter implements Filterable.
-func (v *VMsView) SetFilter(f string) {
-	v.ResourceTable.SetFilter(f)
 }
 
 // Hints implements HintProvider. Only resource-specific bindings; generic
@@ -135,6 +109,3 @@ func (v *VMsView) openLogs() bool {
 	v.app.PushOverlay(lv)
 	return true
 }
-
-// TableDataChanged / TableLoadFailed are inherited from the embedded
-// *ResourceTable, which schedules repaints on the tview main goroutine.

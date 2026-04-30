@@ -4,29 +4,23 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/dao/buildhistory"
-	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
 )
 
 // BuildHistoryView is the tview page for Cloud Build execution history.
-// It starts with the 10 most recent builds and appends the next page on
-// PageDown when a next-page token is available.
+//
+// Lifecycle, rendering, model wiring, pagination (PageDown → next page),
+// and Filterable/ResourceView/TableListener glue all come from the embedded
+// *ResourceTable. Only resource-specific concerns live here: the typed DAO
+// reference, key bindings, hints, and the cancel/log actions.
 type BuildHistoryView struct {
 	*ResourceTable
 
 	app     *App
-	mdl     *model.Table
 	project string
 	dao     *buildhistory.BuildHistory
-
-	// accumulated state — updated on every TableDataChanged + every page load.
-	allRows       []dao.Row
-	nextPageToken string
-	loading       bool // true while a background page fetch is in flight
 }
 
 // Ensure interfaces are satisfied at compile time.
@@ -38,49 +32,13 @@ var (
 
 // NewBuildHistoryView creates a BuildHistoryView for the given project.
 func NewBuildHistoryView(a *App, project string) *BuildHistoryView {
-	v := &BuildHistoryView{
-		ResourceTable: NewResourceTable(a, "Build History"),
+	d := new(buildhistory.BuildHistory)
+	return &BuildHistoryView{
+		ResourceTable: NewResourceView(a, project, "buildhistory", "Build History", "build history", d, buildhistory.PageSize),
 		app:           a,
 		project:       project,
-		mdl:           model.NewTable("buildhistory", project),
-		dao:           new(buildhistory.BuildHistory),
+		dao:           d,
 	}
-	v.mdl.AddListener(v)
-
-	// Intercept PageDown to load the next page when one is available.
-	v.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyPgDn {
-			v.maybeLoadNextPage()
-			// still return the event so the table scrolls normally
-		}
-		return event
-	})
-
-	return v
-}
-
-// Primitive implements ResourceView.
-func (v *BuildHistoryView) Primitive() tview.Primitive { return v.Table }
-
-// Watch implements ResourceView.
-func (v *BuildHistoryView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
-
-// Stop implements ResourceView.
-func (v *BuildHistoryView) Stop() { v.mdl.Stop() }
-
-// DAO implements ResourceView.
-func (v *BuildHistoryView) DAO() dao.Accessor { return v.dao }
-
-// RenderLoading implements ResourceView.
-func (v *BuildHistoryView) RenderLoading() {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(" Loading build history… ").
-		SetSelectable(false))
-}
-
-// SetFilter implements Filterable.
-func (v *BuildHistoryView) SetFilter(f string) {
-	v.ResourceTable.SetFilter(f)
 }
 
 // Hints implements HintProvider.
@@ -139,7 +97,7 @@ func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
 			log.Warn().Str("buildId", br.BuildID).Msg("build history: cannot determine log bucket")
 			return
 		}
-		v.app.tview.QueueUpdateDraw(func() {
+		v.app.runOnUI(func() {
 			v.openLogs(br.BuildID, resolvedBucket, br.Status, br.Project, resolvedMode, resolvedCreate)
 		})
 	}()
@@ -197,63 +155,3 @@ func (v *BuildHistoryView) openLogs(buildID, bucket, status, project, loggingMod
 	lv := NewLogView(v.app, buildID, bucket, status, project, loggingMode, createTime)
 	v.app.PushOverlay(lv)
 }
-
-// TableDataChanged implements model.TableListener.
-// Called on a poll tick — replaces accumulated rows with the fresh first page.
-func (v *BuildHistoryView) TableDataChanged(data *dao.TableData) {
-	v.app.tview.QueueUpdateDraw(func() {
-		v.allRows = data.Rows
-		v.nextPageToken = data.NextPageToken
-		v.renderAccumulated(data.Header)
-	})
-}
-
-// TableLoadFailed is inherited from the embedded *ResourceTable.
-
-// maybeLoadNextPage fetches the next page in the background and appends rows.
-// No-op if there is no next page or a fetch is already in flight.
-// Must be called on the tview main goroutine (input capture handler).
-func (v *BuildHistoryView) maybeLoadNextPage() {
-	if v.nextPageToken == "" || v.loading {
-		return
-	}
-	v.loading = true
-
-	token := v.nextPageToken
-	project := v.project
-
-	go func() {
-		data, err := v.dao.NextPage(v.app.ctx, project, token, 10)
-		if err != nil {
-			log.Error().Err(err).Msg("build history: next page failed")
-			v.app.tview.QueueUpdateDraw(func() { v.loading = false })
-			return
-		}
-		v.app.tview.QueueUpdateDraw(func() {
-			v.loading = false
-			v.allRows = append(v.allRows, data.Rows...)
-			v.nextPageToken = data.NextPageToken
-			v.renderAccumulated(data.Header)
-		})
-	}()
-}
-
-// renderAccumulated renders all accumulated rows into the table.
-// Must be called on the tview main goroutine.
-func (v *BuildHistoryView) renderAccumulated(header []string) {
-	accumulated := &dao.TableData{
-		Header:        header,
-		Rows:          v.allRows,
-		NextPageToken: v.nextPageToken,
-	}
-	v.Render(accumulated)
-
-	// If there are more pages, append a hint row.
-	if v.nextPageToken != "" && !v.loading {
-		rowIdx := v.Table.GetRowCount()
-		v.Table.SetCell(rowIdx, 0, tview.NewTableCell(" [darkgray]↓ PageDown to load more… ").
-			SetSelectable(false))
-	}
-}
-
-// renderError is inherited from the embedded *ResourceTable.

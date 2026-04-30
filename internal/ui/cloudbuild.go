@@ -1,21 +1,18 @@
 package ui
 
 import (
-	"context"
-
-	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/dao/cloudbuild"
-	"github.com/brekol/g9s/internal/model"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 )
 
 // CloudBuildView is the tview page for Cloud Build triggers.
+//
+// All lifecycle, rendering, and Filterable/ResourceView/TableListener glue is
+// inherited from the embedded *ResourceTable.
 type CloudBuildView struct {
 	*ResourceTable
 
 	app *App
-	mdl *model.Table
 	dao *cloudbuild.CloudBuild
 }
 
@@ -28,38 +25,12 @@ var (
 
 // NewCloudBuildView creates a CloudBuildView for the given project.
 func NewCloudBuildView(a *App, project string) *CloudBuildView {
-	v := &CloudBuildView{
-		ResourceTable: NewResourceTable(a, "Cloud Build"),
+	d := new(cloudbuild.CloudBuild)
+	return &CloudBuildView{
+		ResourceTable: NewResourceView(a, project, "cloudbuild", "Cloud Build", "Cloud Build triggers", d, 0),
 		app:           a,
-		mdl:           model.NewTable("cloudbuild", project),
-		dao:           new(cloudbuild.CloudBuild),
+		dao:           d,
 	}
-	v.mdl.AddListener(v)
-	return v
-}
-
-// Primitive implements ResourceView.
-func (v *CloudBuildView) Primitive() tview.Primitive { return v.Table }
-
-// Watch implements ResourceView.
-func (v *CloudBuildView) Watch(ctx context.Context) error { return v.mdl.Watch(ctx) }
-
-// Stop implements ResourceView.
-func (v *CloudBuildView) Stop() { v.mdl.Stop() }
-
-// DAO implements ResourceView.
-func (v *CloudBuildView) DAO() dao.Accessor { return v.dao }
-
-// RenderLoading implements ResourceView.
-func (v *CloudBuildView) RenderLoading() {
-	v.Clear()
-	v.SetCell(0, 0, tview.NewTableCell(" Loading Cloud Build triggers… ").
-		SetSelectable(false))
-}
-
-// SetFilter implements Filterable.
-func (v *CloudBuildView) SetFilter(f string) {
-	v.ResourceTable.SetFilter(f)
 }
 
 // Hints implements HintProvider.
@@ -91,6 +62,3 @@ func (v *CloudBuildView) openRunOverlay() bool {
 	v.app.PushOverlay(overlay)
 	return true
 }
-
-// TableDataChanged / TableLoadFailed are inherited from the embedded
-// *ResourceTable, which schedules repaints on the tview main goroutine.
