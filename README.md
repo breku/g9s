@@ -2,6 +2,8 @@
 
 A terminal UI for Google Cloud Platform resources.
 
+![g9s demo](docs/g9s.gif)
+
 Browse and manage Cloud Run services, Cloud Build triggers, build history,
 Compute Engine VMs, and Secret Manager secrets — all without leaving the
 terminal.
