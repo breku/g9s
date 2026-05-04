@@ -32,37 +32,6 @@ func (b *BuildHistory) CancelBuild(ctx context.Context, project, buildID string)
 	return nil
 }
 
-// GetBuild fetches a single build by project and build ID.
-func (b *BuildHistory) GetBuild(ctx context.Context, project, buildID string) (*cloudbuildpb.Build, error) {
-	client, err := gcp.CloudBuildClient()
-	if err != nil {
-		return nil, fmt.Errorf("buildhistory: client: %w", err)
-	}
-
-	return client.GetBuild(ctx, &cloudbuildpb.GetBuildRequest{
-		ProjectId: project,
-		Id:        buildID,
-	})
-}
-
-// LogsBucketForBuild returns the GCS bucket name (without gs:// prefix) for
-// a build's logs. It uses the build's LogsBucket field when set, and falls
-// back to deriving the default bucket from the LogUrl.
-func LogsBucketForBuild(b *cloudbuildpb.Build) string {
-	if b.LogsBucket != "" {
-		return strings.TrimPrefix(b.LogsBucket, "gs://")
-	}
-	if b.LogUrl != "" {
-		if idx := strings.Index(b.LogUrl, "?project="); idx != -1 {
-			projectNumber := b.LogUrl[idx+len("?project="):]
-			if projectNumber != "" {
-				return projectNumber + ".cloudbuild-logs.googleusercontent.com"
-			}
-		}
-	}
-	return ""
-}
-
 // Ensure BuildHistory satisfies Accessor and Paginator, and BuildRow satisfies Row.
 var (
 	_ dao.Accessor  = (*BuildHistory)(nil)

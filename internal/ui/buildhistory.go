@@ -6,7 +6,6 @@ import (
 
 	"github.com/brekol/g9s/internal/dao/buildhistory"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rs/zerolog/log"
 )
 
 // BuildHistoryView is the tview page for Cloud Build execution history.
@@ -80,27 +79,6 @@ func (v *BuildHistoryView) HandleKey(event *tcell.EventKey) bool {
 		return true
 	}
 
-	// Bucket not populated yet — call GetBuild to resolve it.
-	go func() {
-		b, err := v.dao.GetBuild(v.app.ctx, br.Project, br.BuildID)
-		if err != nil {
-			log.Error().Err(err).Str("buildId", br.BuildID).Msg("build history: GetBuild failed")
-			return
-		}
-		resolvedMode := b.Options.GetLogging().String()
-		resolvedBucket := buildhistory.LogsBucketForBuild(b)
-		resolvedCreate := br.CreateTime
-		if b.CreateTime != nil {
-			resolvedCreate = b.CreateTime.AsTime().UTC().Format("2006-01-02T15:04:05Z")
-		}
-		if resolvedMode != "CLOUD_LOGGING_ONLY" && resolvedBucket == "" {
-			log.Warn().Str("buildId", br.BuildID).Msg("build history: cannot determine log bucket")
-			return
-		}
-		v.app.runOnUI(func() {
-			v.openLogs(br.BuildID, resolvedBucket, br.Status, br.Project, resolvedMode, resolvedCreate)
-		})
-	}()
 	return true
 }
 
