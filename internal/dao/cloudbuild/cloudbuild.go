@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
@@ -61,16 +60,10 @@ func (c *CloudBuild) Header() []string {
 
 // List fetches all Cloud Build triggers in the given project (global location).
 func (c *CloudBuild) List(ctx context.Context, project string) (*dao.TableData, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.CloudBuildClient()
 	if err != nil {
-		return nil, fmt.Errorf("cloudbuild: credentials: %w", err)
+		return nil, fmt.Errorf("cloudbuild: client: %w", err)
 	}
-
-	client, err := cloudbuild.NewClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("cloudbuild: new client: %w", err)
-	}
-	defer client.Close()
 
 	req := &cloudbuildpb.ListBuildTriggersRequest{
 		Parent: fmt.Sprintf("projects/%s/locations/global", project),
@@ -177,15 +170,10 @@ func projectFromResourceName(name string) string {
 
 // RunTrigger triggers a Cloud Build run for the given trigger ID and branch.
 func (c *CloudBuild) RunTrigger(ctx context.Context, project, triggerID, branch string) error {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.CloudBuildClient()
 	if err != nil {
-		return fmt.Errorf("cloudbuild: credentials: %w", err)
+		return fmt.Errorf("cloudbuild: client: %w", err)
 	}
-	client, err := cloudbuild.NewClient(ctx, opts...)
-	if err != nil {
-		return fmt.Errorf("cloudbuild: new client: %w", err)
-	}
-	defer client.Close()
 
 	req := &cloudbuildpb.RunBuildTriggerRequest{
 		ProjectId: project,

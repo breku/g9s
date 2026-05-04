@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 
-	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
@@ -57,16 +56,10 @@ func (s *Secrets) Header() []string {
 
 // List fetches all secrets in the given project.
 func (s *Secrets) List(ctx context.Context, project string) (*dao.TableData, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.SecretManagerClient()
 	if err != nil {
-		return nil, fmt.Errorf("secrets: credentials: %w", err)
+		return nil, fmt.Errorf("secrets: client: %w", err)
 	}
-
-	client, err := secretmanager.NewClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("secrets: new client: %w", err)
-	}
-	defer client.Close()
 
 	req := &secretmanagerpb.ListSecretsRequest{
 		Parent: fmt.Sprintf("projects/%s", project),
@@ -137,15 +130,10 @@ func rowFromSecret(s *secretmanagerpb.Secret) *SecretRow {
 // AccessLatestSecret fetches the plaintext payload of the latest enabled
 // version of the given secret.
 func (s *Secrets) AccessLatestSecret(ctx context.Context, secretName string) (string, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.SecretManagerClient()
 	if err != nil {
-		return "", fmt.Errorf("secrets: credentials: %w", err)
+		return "", fmt.Errorf("secrets: client: %w", err)
 	}
-	client, err := secretmanager.NewClient(ctx, opts...)
-	if err != nil {
-		return "", fmt.Errorf("secrets: new client: %w", err)
-	}
-	defer client.Close()
 
 	resp, err := client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
 		Name: secretName + "/versions/latest",

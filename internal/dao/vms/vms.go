@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
@@ -74,16 +73,10 @@ func (v *VMs) Header() []string {
 
 // List fetches all Compute Engine instances across every zone in the project.
 func (v *VMs) List(ctx context.Context, project string) (*dao.TableData, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.ComputeInstancesClient()
 	if err != nil {
-		return nil, fmt.Errorf("vms: credentials: %w", err)
+		return nil, fmt.Errorf("vms: client: %w", err)
 	}
-
-	client, err := compute.NewInstancesRESTClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("vms: new client: %w", err)
-	}
-	defer client.Close()
 
 	req := &computepb.AggregatedListInstancesRequest{Project: project}
 
@@ -185,15 +178,10 @@ func orDash(s string) string {
 }
 
 func getInstance(ctx context.Context, project, zone, name string) (*computepb.Instance, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.ComputeInstancesClient()
 	if err != nil {
-		return nil, fmt.Errorf("vms: credentials: %w", err)
+		return nil, fmt.Errorf("vms: client: %w", err)
 	}
-	client, err := compute.NewInstancesRESTClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("vms: new client: %w", err)
-	}
-	defer client.Close()
 	return client.Get(ctx, &computepb.GetInstanceRequest{
 		Project:  project,
 		Zone:     zone,
@@ -229,13 +217,9 @@ func (v *VMs) DescribeYAML(ctx context.Context, id string) (string, error) {
 // Delete issues a delete on the given Compute Engine instance.
 // Returns as soon as the API accepts the request — does NOT wait for the LRO.
 func (v *VMs) Delete(ctx context.Context, project, zone, name string) error {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.ComputeInstancesClient()
 	if err != nil {
-		return fmt.Errorf("vms: credentials: %w", err)
-	}
-	client, err := compute.NewInstancesRESTClient(ctx, opts...)
-	if err != nil {
-		return fmt.Errorf("vms: new client: %w", err)
+		return fmt.Errorf("vms: client: %w", err)
 	}
 
 	if _, err := client.Delete(ctx, &computepb.DeleteInstanceRequest{
@@ -243,10 +227,8 @@ func (v *VMs) Delete(ctx context.Context, project, zone, name string) error {
 		Zone:     zone,
 		Instance: name,
 	}); err != nil {
-		_ = client.Close()
 		return fmt.Errorf("vms: delete: %w", err)
 	}
-	go func() { _ = client.Close() }()
 	return nil
 }
 

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
@@ -18,15 +17,10 @@ import (
 
 // CancelBuild cancels an in-progress build by project and build ID.
 func (b *BuildHistory) CancelBuild(ctx context.Context, project, buildID string) error {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.CloudBuildClient()
 	if err != nil {
-		return fmt.Errorf("buildhistory: credentials: %w", err)
+		return fmt.Errorf("buildhistory: client: %w", err)
 	}
-	client, err := cloudbuild.NewClient(ctx, opts...)
-	if err != nil {
-		return fmt.Errorf("buildhistory: new client: %w", err)
-	}
-	defer client.Close()
 
 	_, err = client.CancelBuild(ctx, &cloudbuildpb.CancelBuildRequest{
 		ProjectId: project,
@@ -40,15 +34,10 @@ func (b *BuildHistory) CancelBuild(ctx context.Context, project, buildID string)
 
 // GetBuild fetches a single build by project and build ID.
 func (b *BuildHistory) GetBuild(ctx context.Context, project, buildID string) (*cloudbuildpb.Build, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.CloudBuildClient()
 	if err != nil {
-		return nil, fmt.Errorf("buildhistory: credentials: %w", err)
+		return nil, fmt.Errorf("buildhistory: client: %w", err)
 	}
-	client, err := cloudbuild.NewClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("buildhistory: new client: %w", err)
-	}
-	defer client.Close()
 
 	return client.GetBuild(ctx, &cloudbuildpb.GetBuildRequest{
 		ProjectId: project,
@@ -146,16 +135,10 @@ func (b *BuildHistory) List(ctx context.Context, project string) (*dao.TableData
 // NextPage fetches a page of builds using the given page token.
 // An empty pageToken fetches the first page.
 func (b *BuildHistory) NextPage(ctx context.Context, project, pageToken string, pageSize int) (*dao.TableData, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.CloudBuildClient()
 	if err != nil {
-		return nil, fmt.Errorf("buildhistory: credentials: %w", err)
+		return nil, fmt.Errorf("buildhistory: client: %w", err)
 	}
-
-	client, err := cloudbuild.NewClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("buildhistory: new client: %w", err)
-	}
-	defer client.Close()
 
 	req := &cloudbuildpb.ListBuildsRequest{
 		ProjectId: project,

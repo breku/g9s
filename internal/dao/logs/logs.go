@@ -8,9 +8,7 @@ import (
 	"strings"
 	"time"
 
-	logging "cloud.google.com/go/logging/apiv2"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
-	"cloud.google.com/go/storage"
 	"github.com/brekol/g9s/internal/gcp"
 	"github.com/rs/zerolog/log"
 )
@@ -18,16 +16,10 @@ import (
 // FetchCloudLoggingPage fetches log text entries matching filter from the
 // Cloud Logging API for the given project.
 func FetchCloudLoggingPage(ctx context.Context, project, filter, since, afterInsertID string) (lines []string, lastInsertID, lastTimestamp string, err error) {
-	opts, err := gcp.ClientOptions(ctx)
-	if err != nil {
-		return nil, afterInsertID, since, fmt.Errorf("logs: credentials: %w", err)
-	}
-
-	client, err := logging.NewClient(ctx, opts...)
+	client, err := gcp.LoggingClient()
 	if err != nil {
 		return nil, afterInsertID, since, fmt.Errorf("logs: logging client: %w", err)
 	}
-	defer client.Close()
 
 	fullFilter := filter
 	if since != "" {
@@ -81,15 +73,10 @@ func FetchCloudLoggingPage(ctx context.Context, project, filter, since, afterIns
 // FetchCloudLoggingInitial fetches the most recent log entries fast by querying
 // in descending order and reversing the result for display.
 func FetchCloudLoggingInitial(ctx context.Context, project, filter, since string, pageSize int32) (lines []string, oldestTimestamp, newestInsertID string, err error) {
-	opts, err := gcp.ClientOptions(ctx)
-	if err != nil {
-		return nil, since, "", fmt.Errorf("logs: credentials: %w", err)
-	}
-	client, err := logging.NewClient(ctx, opts...)
+	client, err := gcp.LoggingClient()
 	if err != nil {
 		return nil, since, "", fmt.Errorf("logs: logging client: %w", err)
 	}
-	defer client.Close()
 
 	fullFilter := filter
 	if since != "" {
@@ -142,16 +129,10 @@ func FetchCloudLoggingInitial(ctx context.Context, project, filter, since string
 // FetchGCSRange reads bytes from a GCS object starting at byteOffset.
 // Pass byteOffset=0 to read the whole object.
 func FetchGCSRange(ctx context.Context, bucket, object string, byteOffset int64) ([]byte, int64, error) {
-	opts, err := gcp.ClientOptions(ctx)
-	if err != nil {
-		return nil, byteOffset, fmt.Errorf("logs: credentials: %w", err)
-	}
-
-	client, err := storage.NewClient(ctx, opts...)
+	client, err := gcp.StorageClient()
 	if err != nil {
 		return nil, byteOffset, fmt.Errorf("logs: storage client: %w", err)
 	}
-	defer client.Close()
 
 	log.Debug().Str("bucket", bucket).Str("object", object).Int64("offset", byteOffset).Msg("logs: reading GCS object")
 

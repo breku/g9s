@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
@@ -63,16 +62,10 @@ func (c *CloudRun) Header() []string {
 
 // List fetches all Cloud Run services across all regions in the given project.
 func (c *CloudRun) List(ctx context.Context, project string) (*dao.TableData, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.RunServicesClient()
 	if err != nil {
-		return nil, fmt.Errorf("cloudrun: credentials: %w", err)
+		return nil, fmt.Errorf("cloudrun: client: %w", err)
 	}
-
-	client, err := run.NewServicesClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("cloudrun: new client: %w", err)
-	}
-	defer client.Close()
 
 	// "-" as location means list across all regions.
 	req := &runpb.ListServicesRequest{
@@ -161,15 +154,10 @@ func conditionState(c *runpb.Condition) string {
 
 // getService fetches a single Cloud Run service by fully-qualified name.
 func getService(ctx context.Context, name string) (*runpb.Service, error) {
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.RunServicesClient()
 	if err != nil {
-		return nil, fmt.Errorf("cloudrun: credentials: %w", err)
+		return nil, fmt.Errorf("cloudrun: client: %w", err)
 	}
-	client, err := run.NewServicesClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("cloudrun: new client: %w", err)
-	}
-	defer client.Close()
 	return client.GetService(ctx, &runpb.GetServiceRequest{Name: name})
 }
 
@@ -225,23 +213,17 @@ func (c *CloudRun) UpdateServiceFromYAML(ctx context.Context, yamlStr string) (w
 		return nil, fmt.Errorf("cloudrun: service name missing from yaml")
 	}
 
-	opts, err := gcp.ClientOptions(ctx)
+	client, err := gcp.RunServicesClient()
 	if err != nil {
-		return nil, fmt.Errorf("cloudrun: credentials: %w", err)
-	}
-	client, err := run.NewServicesClient(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("cloudrun: new client: %w", err)
+		return nil, fmt.Errorf("cloudrun: client: %w", err)
 	}
 
 	op, err := client.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc})
 	if err != nil {
-		_ = client.Close()
 		return nil, fmt.Errorf("cloudrun: update: %w", err)
 	}
 
 	wait = func(waitCtx context.Context) error {
-		defer client.Close()
 		if _, err := op.Wait(waitCtx); err != nil {
 			return fmt.Errorf("cloudrun: deploy: %w", err)
 		}
