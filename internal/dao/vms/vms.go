@@ -71,18 +71,32 @@ func (v *VMs) Header() []string {
 	return []string{"NAME", "ZONE", "MACHINE TYPE", "STATUS", "INTERNAL IP", "EXTERNAL IP", "CREATED"}
 }
 
-// List fetches all Compute Engine instances across every zone in the project.
-func (v *VMs) List(ctx context.Context, project string) (*dao.TableData, error) {
+// FetchPage implements dao.Accessor. Fetches one page of Compute Engine
+// instances aggregated across every zone in the project. The aggregated
+// API returns one (zone → []instance) pair per zone; we flatten and cap
+// at pageSize, then propagate whatever NextPageToken the iterator exposes.
+// An empty pageToken requests the first page.
+func (v *VMs) FetchPage(ctx context.Context, project, pageToken string, pageSize int) (*dao.TableData, error) {
+	if pageSize <= 0 {
+		pageSize = 50
+	}
 	client, err := gcp.ComputeInstancesClient()
 	if err != nil {
 		return nil, fmt.Errorf("vms: client: %w", err)
 	}
 
-	req := &computepb.AggregatedListInstancesRequest{Project: project}
+	max := uint32(pageSize)
+	req := &computepb.AggregatedListInstancesRequest{
+		Project:    project,
+		MaxResults: &max,
+	}
+	if pageToken != "" {
+		req.PageToken = &pageToken
+	}
 
 	var rows []dao.Row
 	it := client.AggregatedList(ctx, req)
-	for {
+	for len(rows) < pageSize {
 		pair, err := it.Next()
 		if err == iterator.Done {
 			break
@@ -92,12 +106,16 @@ func (v *VMs) List(ctx context.Context, project string) (*dao.TableData, error) 
 		}
 		for _, inst := range pair.Value.GetInstances() {
 			rows = append(rows, rowFromInstance(inst))
+			if len(rows) >= pageSize {
+				break
+			}
 		}
 	}
 
 	return &dao.TableData{
-		Header: v.Header(),
-		Rows:   rows,
+		Header:        v.Header(),
+		Rows:          rows,
+		NextPageToken: it.PageInfo().Token,
 	}, nil
 }
 

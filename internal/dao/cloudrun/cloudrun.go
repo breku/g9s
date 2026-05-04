@@ -60,21 +60,28 @@ func (c *CloudRun) Header() []string {
 	return []string{"NAME", "REGION", "STATUS", "URL", "LAST DEPLOYED", "DEPLOYED BY"}
 }
 
-// List fetches all Cloud Run services across all regions in the given project.
-func (c *CloudRun) List(ctx context.Context, project string) (*dao.TableData, error) {
+// FetchPage implements dao.Accessor. Fetches one page of Cloud Run services
+// across all regions in the given project. The wildcard "locations/-"
+// parent is accepted by the v2 API for ListServices despite what the proto
+// docs imply. An empty pageToken requests the first page.
+func (c *CloudRun) FetchPage(ctx context.Context, project, pageToken string, pageSize int) (*dao.TableData, error) {
+	if pageSize <= 0 {
+		pageSize = 50
+	}
 	client, err := gcp.RunServicesClient()
 	if err != nil {
 		return nil, fmt.Errorf("cloudrun: client: %w", err)
 	}
 
-	// "-" as location means list across all regions.
 	req := &runpb.ListServicesRequest{
-		Parent: fmt.Sprintf("projects/%s/locations/-", project),
+		Parent:    fmt.Sprintf("projects/%s/locations/-", project),
+		PageSize:  int32(pageSize),
+		PageToken: pageToken,
 	}
 
 	var rows []dao.Row
 	it := client.ListServices(ctx, req)
-	for {
+	for i := 0; i < pageSize; i++ {
 		svc, err := it.Next()
 		if err == iterator.Done {
 			break
@@ -86,8 +93,9 @@ func (c *CloudRun) List(ctx context.Context, project string) (*dao.TableData, er
 	}
 
 	return &dao.TableData{
-		Header: c.Header(),
-		Rows:   rows,
+		Header:        c.Header(),
+		Rows:          rows,
+		NextPageToken: it.PageInfo().Token,
 	}, nil
 }
 

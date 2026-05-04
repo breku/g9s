@@ -33,19 +33,19 @@ var (
 func NewBuildHistoryView(a *App, project string) *BuildHistoryView {
 	d := new(buildhistory.BuildHistory)
 	return &BuildHistoryView{
-		ResourceTable: NewResourceView(a, project, "buildhistory", "Build History", "build history", d, buildhistory.PageSize),
+		ResourceTable: NewResourceView(a, project, "buildhistory", "Build History", "build history", d),
 		app:           a,
 		project:       project,
 		dao:           d,
 	}
 }
 
-// Hints implements HintProvider.
+// Hints implements HintProvider. Only resource-specific bindings; generic
+// y/c/PgDn are advertised by the global dispatcher.
 func (v *BuildHistoryView) Hints() []Hint {
 	return []Hint{
 		{Key: "l", Desc: "View logs"},
 		{Key: "C", Desc: "Cancel build"},
-		{Key: "PgDn", Desc: "Next page"},
 	}
 }
 

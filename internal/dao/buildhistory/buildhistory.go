@@ -32,16 +32,11 @@ func (b *BuildHistory) CancelBuild(ctx context.Context, project, buildID string)
 	return nil
 }
 
-// Ensure BuildHistory satisfies Accessor and Paginator, and BuildRow satisfies Row.
+// Ensure BuildHistory satisfies Accessor and BuildRow satisfies Row.
 var (
-	_ dao.Accessor  = (*BuildHistory)(nil)
-	_ dao.Paginator = (*BuildHistory)(nil)
-	_ dao.Row       = (*BuildRow)(nil)
+	_ dao.Accessor = (*BuildHistory)(nil)
+	_ dao.Row      = (*BuildRow)(nil)
 )
-
-// PageSize is the number of builds fetched per page. Exported so the UI
-// layer can pass it to the paginated ResourceTable constructor.
-const PageSize = 10
 
 // BuildHistory is the DAO for Cloud Build build executions (history).
 type BuildHistory struct{}
@@ -96,14 +91,13 @@ func (b *BuildHistory) Header() []string {
 	return []string{"ID", "TRIGGER", "STATUS", "STARTED", "DURATION", "BRANCH", "IMAGES"}
 }
 
-// List fetches the first page of builds (10 most recent).
-func (b *BuildHistory) List(ctx context.Context, project string) (*dao.TableData, error) {
-	return b.NextPage(ctx, project, "", PageSize)
-}
-
-// NextPage fetches a page of builds using the given page token.
-// An empty pageToken fetches the first page.
-func (b *BuildHistory) NextPage(ctx context.Context, project, pageToken string, pageSize int) (*dao.TableData, error) {
+// FetchPage implements dao.Accessor. An empty pageToken fetches the first
+// (most recent) page of builds; the returned NextPageToken can be passed
+// back in to fetch subsequent pages.
+func (b *BuildHistory) FetchPage(ctx context.Context, project, pageToken string, pageSize int) (*dao.TableData, error) {
+	if pageSize <= 0 {
+		pageSize = 50
+	}
 	client, err := gcp.CloudBuildClient()
 	if err != nil {
 		return nil, fmt.Errorf("buildhistory: client: %w", err)

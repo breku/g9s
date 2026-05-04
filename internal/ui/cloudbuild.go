@@ -27,7 +27,7 @@ var (
 func NewCloudBuildView(a *App, project string) *CloudBuildView {
 	d := new(cloudbuild.CloudBuild)
 	return &CloudBuildView{
-		ResourceTable: NewResourceView(a, project, "cloudbuild", "Cloud Build", "Cloud Build triggers", d, 0),
+		ResourceTable: NewResourceView(a, project, "cloudbuild", "Cloud Build", "Cloud Build triggers", d),
 		app:           a,
 		dao:           d,
 	}

@@ -35,7 +35,7 @@ var (
 func NewCloudRunView(a *App, project string) *CloudRunView {
 	d := new(cloudrun.CloudRun)
 	return &CloudRunView{
-		ResourceTable: NewResourceView(a, project, "cloudrun", "Cloud Run", "Cloud Run services", d, 0),
+		ResourceTable: NewResourceView(a, project, "cloudrun", "Cloud Run", "Cloud Run services", d),
 		app:           a,
 		project:       project,
 		dao:           d,

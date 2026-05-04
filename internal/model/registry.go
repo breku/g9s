@@ -16,7 +16,7 @@ import (
 //
 // RefreshRate is the polling interval used while a view is active. Choose
 // based on how often the resource changes in practice and the cost of the
-// List API call.
+// FetchPage API call. Page size is uniform (model.DefaultPageSize).
 var Registry = map[string]ResourceMeta{
 	"cloudrun":     {DAO: new(cloudrun.CloudRun), RefreshRate: 30 * time.Second},
 	"cloudbuild":   {DAO: new(cloudbuild.CloudBuild), RefreshRate: 30 * time.Second},

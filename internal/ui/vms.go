@@ -32,7 +32,7 @@ var (
 func NewVMsView(a *App, project string) *VMsView {
 	d := new(vms.VMs)
 	return &VMsView{
-		ResourceTable: NewResourceView(a, project, "vms", "VMs", "VM instances", d, 0),
+		ResourceTable: NewResourceView(a, project, "vms", "VMs", "VM instances", d),
 		app:           a,
 		dao:           d,
 	}

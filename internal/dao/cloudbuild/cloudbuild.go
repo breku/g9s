@@ -58,20 +58,27 @@ func (c *CloudBuild) Header() []string {
 	return []string{"NAME", "DESCRIPTION", "STATUS", "EVENT", "REPOSITORY", "CREATED"}
 }
 
-// List fetches all Cloud Build triggers in the given project (global location).
-func (c *CloudBuild) List(ctx context.Context, project string) (*dao.TableData, error) {
+// FetchPage implements dao.Accessor. Fetches one page of Cloud Build
+// triggers in the global location for the given project. An empty
+// pageToken requests the first page.
+func (c *CloudBuild) FetchPage(ctx context.Context, project, pageToken string, pageSize int) (*dao.TableData, error) {
+	if pageSize <= 0 {
+		pageSize = 50
+	}
 	client, err := gcp.CloudBuildClient()
 	if err != nil {
 		return nil, fmt.Errorf("cloudbuild: client: %w", err)
 	}
 
 	req := &cloudbuildpb.ListBuildTriggersRequest{
-		Parent: fmt.Sprintf("projects/%s/locations/global", project),
+		Parent:    fmt.Sprintf("projects/%s/locations/global", project),
+		PageSize:  int32(pageSize),
+		PageToken: pageToken,
 	}
 
 	var rows []dao.Row
 	it := client.ListBuildTriggers(ctx, req)
-	for {
+	for i := 0; i < pageSize; i++ {
 		trigger, err := it.Next()
 		if err == iterator.Done {
 			break
@@ -83,8 +90,9 @@ func (c *CloudBuild) List(ctx context.Context, project string) (*dao.TableData, 
 	}
 
 	return &dao.TableData{
-		Header: c.Header(),
-		Rows:   rows,
+		Header:        c.Header(),
+		Rows:          rows,
+		NextPageToken: it.PageInfo().Token,
 	}, nil
 }
 

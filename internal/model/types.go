@@ -26,8 +26,13 @@ type TableListener interface {
 // RefreshRate is the interval between background fetches while a view is
 // active (i.e. between the user opening the view and switching away from
 // it). Choose it based on how often the resource changes in practice and
-// the cost of the List call.
+// the cost of the FetchPage call.
 type ResourceMeta struct {
 	DAO         dao.Accessor
 	RefreshRate time.Duration
 }
+
+// DefaultPageSize is the page size handed to DAO.FetchPage for every
+// resource. Tuned to cover a typical terminal height while keeping each
+// fetch cheap.
+const DefaultPageSize = 50

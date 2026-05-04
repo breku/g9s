@@ -29,7 +29,7 @@ var (
 func NewSecretsView(a *App, project string) *SecretsView {
 	d := new(secrets.Secrets)
 	return &SecretsView{
-		ResourceTable: NewResourceView(a, project, "secrets", "Secrets", "secrets", d, 0),
+		ResourceTable: NewResourceView(a, project, "secrets", "Secrets", "secrets", d),
 		app:           a,
 		dao:           d,
 	}

@@ -52,7 +52,7 @@ type TableData struct {
 }
 
 // Accessor is the single required interface every DAO must satisfy.
-// It provides list semantics and self-identification.
+// It provides paginated list semantics and self-identification.
 type Accessor interface {
 	// Resource returns a short, stable identifier for the resource type
 	// (e.g. "cloudrun", "gce-instances"). Used as the registry key.
@@ -61,9 +61,16 @@ type Accessor interface {
 	// Header returns the column names for this resource's table view.
 	Header() []string
 
-	// List fetches all instances of the resource in the given project.
-	// Returns structured TableData ready for the model layer.
-	List(ctx context.Context, project string) (*TableData, error)
+	// FetchPage fetches one page of resources for the given project.
+	// An empty pageToken requests the first page; subsequent calls should
+	// pass the NextPageToken returned by the previous TableData. pageSize
+	// is the maximum number of rows the caller wants in this page; DAOs
+	// should treat values <= 0 as "use a sensible default".
+	//
+	// When the underlying API does not support cursors (e.g. aggregated
+	// listings), implementations may emulate pagination by capping the
+	// result count and returning an empty NextPageToken on the last page.
+	FetchPage(ctx context.Context, project, pageToken string, pageSize int) (*TableData, error)
 }
 
 // YAMLDescriber is an optional capability for DAOs that can render a single
@@ -71,13 +78,4 @@ type Accessor interface {
 // the user edits when pressing 'e' on resources that also support edit.
 type YAMLDescriber interface {
 	DescribeYAML(ctx context.Context, id string) (string, error)
-}
-
-// Paginator is an optional interface for DAOs that support cursor-based
-// pagination. List() on such a DAO returns only the first page; callers
-// use NextPage to fetch subsequent pages using the token from TableData.
-type Paginator interface {
-	// NextPage fetches the next page of results using the given page token.
-	// pageSize is the maximum number of rows to return.
-	NextPage(ctx context.Context, project, pageToken string, pageSize int) (*TableData, error)
 }

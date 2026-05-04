@@ -54,20 +54,26 @@ func (s *Secrets) Header() []string {
 	return []string{"NAME", "REPLICATION", "LABELS", "CREATED"}
 }
 
-// List fetches all secrets in the given project.
-func (s *Secrets) List(ctx context.Context, project string) (*dao.TableData, error) {
+// FetchPage implements dao.Accessor. An empty pageToken requests the first
+// page of secrets in the project.
+func (s *Secrets) FetchPage(ctx context.Context, project, pageToken string, pageSize int) (*dao.TableData, error) {
+	if pageSize <= 0 {
+		pageSize = 50
+	}
 	client, err := gcp.SecretManagerClient()
 	if err != nil {
 		return nil, fmt.Errorf("secrets: client: %w", err)
 	}
 
 	req := &secretmanagerpb.ListSecretsRequest{
-		Parent: fmt.Sprintf("projects/%s", project),
+		Parent:    fmt.Sprintf("projects/%s", project),
+		PageSize:  int32(pageSize),
+		PageToken: pageToken,
 	}
 
 	var rows []dao.Row
 	it := client.ListSecrets(ctx, req)
-	for {
+	for i := 0; i < pageSize; i++ {
 		secret, err := it.Next()
 		if err == iterator.Done {
 			break
@@ -79,8 +85,9 @@ func (s *Secrets) List(ctx context.Context, project string) (*dao.TableData, err
 	}
 
 	return &dao.TableData{
-		Header: s.Header(),
-		Rows:   rows,
+		Header:        s.Header(),
+		Rows:          rows,
+		NextPageToken: it.PageInfo().Token,
 	}, nil
 }
 
