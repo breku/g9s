@@ -47,6 +47,11 @@ type ResourceTable struct {
 	nextCursor  string
 	lastHeader  []string
 	loadingPage bool
+	// paginated is true once the user has successfully loaded at least one
+	// extra page via PageDown. While true, periodic poll refreshes update
+	// the first page in place instead of resetting the accumulator, so the
+	// user isn't snapped back to page 1 every RefreshRate.
+	paginated bool
 
 	// --- render state ---
 	lastData *dao.TableData
@@ -169,19 +174,72 @@ func (r *ResourceTable) RenderLoading() {
 
 // TableDataChanged implements model.TableListener. In non-paginated mode it
 // replaces the rendered data wholesale. In paginated mode it resets the
-// accumulator to the freshly-polled first page (this is what happens on every
-// poll tick, so the table stays in sync with server-side changes).
+// accumulator to the freshly-polled first page — except when the user has
+// already paged past page 1, in which case it merges the fresh first page
+// into the accumulator (refreshing statuses for visible rows, prepending
+// any new rows) without discarding pages the user has loaded via PageDown.
 func (r *ResourceTable) TableDataChanged(data *dao.TableData) {
 	r.app.runOnUI(func() {
 		if r.pageSize > 0 {
-			r.allRows = data.Rows
-			r.nextCursor = data.NextPageToken
 			r.lastHeader = data.Header
+			if r.paginated {
+				r.mergeFirstPage(data.Rows)
+			} else {
+				r.allRows = data.Rows
+				r.nextCursor = data.NextPageToken
+			}
 			r.renderAccumulated()
 			return
 		}
 		r.Render(data)
 	})
+}
+
+// mergeFirstPage updates the accumulator with a freshly polled first page
+// while preserving rows the user has loaded by paginating. Existing rows
+// whose IDs appear in freshRows are replaced in place (status updates
+// flow through). Rows in freshRows whose IDs aren't yet known are
+// prepended in their original order. nextCursor is left untouched because
+// it already points past the pages the user has loaded; using the token
+// returned with page 1 would re-fetch pages that are already on screen.
+// Must be called on the tview main goroutine.
+func (r *ResourceTable) mergeFirstPage(freshRows []dao.Row) {
+	freshByID := make(map[string]dao.Row, len(freshRows))
+	for _, row := range freshRows {
+		freshByID[row.GetID()] = row
+	}
+
+	merged := make([]dao.Row, 0, len(r.allRows)+len(freshRows))
+	seen := make(map[string]struct{}, len(r.allRows))
+
+	// Prepend new-to-us rows from the fresh first page in their original order.
+	knownIDs := make(map[string]struct{}, len(r.allRows))
+	for _, row := range r.allRows {
+		knownIDs[row.GetID()] = struct{}{}
+	}
+	for _, row := range freshRows {
+		if _, known := knownIDs[row.GetID()]; !known {
+			merged = append(merged, row)
+			seen[row.GetID()] = struct{}{}
+		}
+	}
+
+	// Then walk the existing accumulator, replacing with the fresh copy
+	// when one exists so statuses (e.g. QUEUED → SUCCESS) update.
+	for _, row := range r.allRows {
+		id := row.GetID()
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if fresh, ok := freshByID[id]; ok {
+			merged = append(merged, fresh)
+		} else {
+			merged = append(merged, row)
+		}
+		seen[id] = struct{}{}
+	}
+
+	r.allRows = merged
 }
 
 // TableLoadFailed implements model.TableListener.
@@ -259,6 +317,7 @@ func (r *ResourceTable) maybeLoadNextPage() {
 			if r.lastHeader == nil {
 				r.lastHeader = data.Header
 			}
+			r.paginated = true
 			r.renderAccumulated()
 		})
 	}()
