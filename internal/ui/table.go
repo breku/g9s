@@ -193,6 +193,10 @@ func (r *ResourceTable) SetFilter(f string) {
 	r.repaint()
 }
 
+// Filter returns the active filter string ("" if none). Used by the App's
+// Esc handler to decide whether Esc should clear the filter.
+func (r *ResourceTable) Filter() string { return r.filter }
+
 // SelectedRow returns the dao.Row for the currently selected table row.
 // Returns nil if nothing is selected or the table is empty.
 func (r *ResourceTable) SelectedRow() dao.Row {

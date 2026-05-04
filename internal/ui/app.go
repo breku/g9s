@@ -96,12 +96,23 @@ func New(cfg *config.Config) *App {
 			a.stop()
 			return nil
 		}
+		// Esc clears an active filter on the current resource view. We do
+		// this only when no overlay is up (overlays handle their own Esc)
+		// and only when a filter is actually set, so Esc remains a no-op
+		// in the common case rather than silently swallowed.
+		if event.Key() == tcell.KeyEscape && a.activeOverlay == nil && a.activeView != nil {
+			if fr, ok := a.activeView.(interface{ Filter() string }); ok && fr.Filter() != "" {
+				a.activeView.SetFilter("")
+				return nil
+			}
+		}
 		// Generic cross-resource keys (y, c) handled centrally so each
 		// view doesn't reimplement them. Runs before the view's own
 		// KeyHandler so views can't accidentally shadow them. Note: 'q'
 		// is intentionally NOT a global quit — Ctrl-C is the only quit
 		// binding. Overlays may still bind 'q' locally for their own
-		// dismiss UX. Esc has no global handler — overlays consume it.
+		// dismiss UX. Esc is handled above (clears filter) but only
+		// when no overlay is active so overlays can still consume it.
 		if a.activeOverlay == nil && a.activeView != nil {
 			if handleGenericKey(a, a.activeView, event) {
 				return nil
