@@ -3,6 +3,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/brekol/g9s/internal/config"
 	"github.com/brekol/g9s/internal/model"
@@ -28,9 +29,12 @@ type App struct {
 	// Used to forward filter keystrokes and optional key bindings.
 	activeView ResourceView
 
-	// activeOverlay is the overlay currently on top, if any.
-	// Used for hint rendering; nil when no overlay is shown.
-	activeOverlay Overlay
+	// overlays is a LIFO stack of mounted overlays. The top of the stack
+	// is the one currently focused; pushing adds a new overlay above the
+	// previous top, popping returns control to the next one down (or to
+	// activeView when the stack empties). Mouse and hint state are derived
+	// from the top of the stack.
+	overlays []Overlay
 
 	// viewCache stores ResourceView instances by resource key so that
 	// navigating back to an already-mounted page restores the correct view.
@@ -100,7 +104,7 @@ func New(cfg *config.Config) *App {
 		// this only when no overlay is up (overlays handle their own Esc)
 		// and only when a filter is actually set, so Esc remains a no-op
 		// in the common case rather than silently swallowed.
-		if event.Key() == tcell.KeyEscape && a.activeOverlay == nil && a.activeView != nil {
+		if event.Key() == tcell.KeyEscape && a.topOverlay() == nil && a.activeView != nil {
 			if fr, ok := a.activeView.(interface{ Filter() string }); ok && fr.Filter() != "" {
 				a.activeView.SetFilter("")
 				return nil
@@ -113,7 +117,7 @@ func New(cfg *config.Config) *App {
 		// binding. Overlays may still bind 'q' locally for their own
 		// dismiss UX. Esc is handled above (clears filter) but only
 		// when no overlay is active so overlays can still consume it.
-		if a.activeOverlay == nil && a.activeView != nil {
+		if a.topOverlay() == nil && a.activeView != nil {
 			if handleGenericKey(a, a.activeView, event) {
 				return nil
 			}
@@ -252,6 +256,8 @@ func (a *App) hideCmdBar() {
 }
 
 // handleCommand is called when the user submits a ':' command.
+// Any open overlays are popped first so the resource switch lands on a
+// clean view (per UX decision: cmdbar resource-switch closes overlays).
 func (a *App) handleCommand(text string) {
 	if text == "q" || text == "quit" {
 		a.stop()
@@ -262,15 +268,16 @@ func (a *App) handleCommand(text string) {
 		log.Warn().Str("cmd", text).Msg("unknown resource command")
 		return
 	}
+	a.popAllOverlays()
 	a.showResource(meta.DAO.Resource())
 }
 
 // handleFilter is called on every keystroke in '/' mode.
-// If an overlay is active and implements Filterable, the filter is forwarded
-// there; otherwise it is forwarded to the active resource view.
+// If the top overlay implements Filterable, the filter is forwarded there;
+// otherwise it is forwarded to the active resource view.
 func (a *App) handleFilter(text string) {
-	if a.activeOverlay != nil {
-		if f, ok := a.activeOverlay.(Filterable); ok {
+	if top := a.topOverlay(); top != nil {
+		if f, ok := top.(Filterable); ok {
 			f.SetFilter(text)
 			return
 		}
@@ -280,33 +287,83 @@ func (a *App) handleFilter(text string) {
 	}
 }
 
-// PushOverlay mounts an Overlay on top of the current page, updates hints,
-// disables mouse, and starts the overlay's background work.
+// topOverlay returns the overlay currently on top of the stack, or nil
+// when no overlay is mounted.
+func (a *App) topOverlay() Overlay {
+	if len(a.overlays) == 0 {
+		return nil
+	}
+	return a.overlays[len(a.overlays)-1]
+}
+
+// overlayPageName returns the canonical page name for the overlay at the
+// given stack depth. Each overlay sits on its own page so they stack
+// visually as well as logically.
+func overlayPageName(depth int) string {
+	return fmt.Sprintf("overlay-%d", depth)
+}
+
+// PushOverlay mounts an Overlay on top of the current page (or the
+// previous overlay), updates hints, disables the mouse on the first push,
+// and starts the overlay's background work.
 // Safe to call on the tview main goroutine.
 func (a *App) PushOverlay(o Overlay) {
-	const overlayPage = "overlay"
+	depth := len(a.overlays)
+	page := overlayPageName(depth)
 	o.OnClose(func() { a.PopOverlay() })
-	a.activeOverlay = o
-	a.tview.EnableMouse(false)
-	a.pages.AddPage(overlayPage, o.Primitive(), true, true)
+	a.overlays = append(a.overlays, o)
+	if depth == 0 {
+		a.tview.EnableMouse(false)
+	}
+	a.pages.AddPage(page, o.Primitive(), true, true)
 	a.tview.SetFocus(o.Primitive())
 	o.RenderLoading()
-	if hp, ok := o.(HintProvider); ok {
-		a.header.SetViewHints(hp)
-	} else {
-		a.header.SetViewHints(nil)
-	}
+	a.refreshOverlayHints()
 	go o.Start(a.ctx)
 }
 
-// PopOverlay removes the overlay, restores mouse + focus, and reverts hints
-// to the active resource view.
+// PopOverlay removes the top overlay, restores focus and hints to the
+// next overlay down (or the active resource view when the stack empties),
+// and re-enables the mouse once the stack is empty again.
 func (a *App) PopOverlay() {
-	const overlayPage = "overlay"
-	a.activeOverlay = nil
-	a.pages.RemovePage(overlayPage)
-	a.tview.SetFocus(a.pages)
-	a.tview.EnableMouse(true)
+	if len(a.overlays) == 0 {
+		return
+	}
+	depth := len(a.overlays) - 1
+	a.pages.RemovePage(overlayPageName(depth))
+	a.overlays = a.overlays[:depth]
+
+	if top := a.topOverlay(); top != nil {
+		a.tview.SetFocus(top.Primitive())
+	} else {
+		a.tview.SetFocus(a.pages)
+		a.tview.EnableMouse(true)
+	}
+	a.refreshOverlayHints()
+}
+
+// popAllOverlays drains the overlay stack by popping each in turn. Used
+// when a top-level navigation event (e.g. ':resource' command) needs to
+// clear all drill-down state before switching the active view.
+func (a *App) popAllOverlays() {
+	for len(a.overlays) > 0 {
+		a.PopOverlay()
+	}
+}
+
+// refreshOverlayHints sets the header hint provider from the current
+// top of the stack, or from the active resource view when the stack is
+// empty. Called after every push/pop so hints always reflect what's
+// focused.
+func (a *App) refreshOverlayHints() {
+	if top := a.topOverlay(); top != nil {
+		if hp, ok := top.(HintProvider); ok {
+			a.header.SetViewHints(hp)
+		} else {
+			a.header.SetViewHints(nil)
+		}
+		return
+	}
 	a.header.SetViewHints(viewHintProvider(a.activeView))
 }
 

@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/brekol/g9s/internal/dao/vms"
 	"github.com/gdamore/tcell/v2"
@@ -91,21 +90,9 @@ func (v *VMsView) openLogs() bool {
 		return true
 	}
 	ir, ok := row.(*vms.InstanceRow)
-	if !ok || ir.Project == "" || ir.NumericID == "" {
+	if !ok {
 		return true
 	}
-
-	filter := fmt.Sprintf(`resource.type="gce_instance" AND resource.labels.instance_id="%s"`, ir.NumericID)
-
-	cfg := LogViewConfig{
-		Title:       fmt.Sprintf("Logs – %s", ir.Name),
-		Streaming:   true,
-		Project:     ir.Project,
-		LogFilter:   filter,
-		LogSince:    time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339),
-		LogPageSize: 200,
-	}
-	lv := NewLogViewFromConfig(v.app, cfg)
-	v.app.PushOverlay(lv)
+	openInstanceLogs(v.app, ir.Project, ir.NumericID, ir.Name)
 	return true
 }

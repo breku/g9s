@@ -41,6 +41,12 @@ type Table struct {
 	resource string
 	project  string
 
+	// localMeta, when non-nil, supplies the DAO + RefreshRate for this Table
+	// in place of the global Registry. Used by parameterised drill-down
+	// resources (e.g. miginstances scoped to a parent MIG) that have no
+	// project-only constructor and therefore can't live in the Registry.
+	localMeta *ResourceMeta
+
 	mu        sync.Mutex
 	listeners []TableListener
 	cancel    context.CancelFunc // cancels the active polling goroutine; nil when stopped
@@ -56,11 +62,40 @@ type Table struct {
 }
 
 // NewTable creates a Table model for the given resource and project.
+// The resource key is looked up in the global Registry to find its DAO and
+// RefreshRate. For parameterised drill-down resources that can't live in
+// the Registry, use NewTableWithMeta instead.
 func NewTable(resource, project string) *Table {
 	return &Table{
 		resource: resource,
 		project:  project,
 	}
+}
+
+// NewTableWithMeta creates a Table whose DAO and RefreshRate are supplied
+// inline rather than looked up from the global Registry. Used by
+// parameterised drill-down resources (e.g. miginstances) that are
+// constructed imperatively with parent context already in hand and so
+// don't fit the Registry's project-only-constructor shape.
+//
+// The resource key is still used for log messages; choose a descriptive
+// name like "miginstances".
+func NewTableWithMeta(resource, project string, meta ResourceMeta) *Table {
+	return &Table{
+		resource:  resource,
+		project:   project,
+		localMeta: &meta,
+	}
+}
+
+// resolveMeta returns the effective ResourceMeta: the inline meta when set,
+// otherwise the global Registry entry. Returns ok=false when neither is
+// available.
+func (t *Table) resolveMeta() (ResourceMeta, bool) {
+	if t.localMeta != nil {
+		return *t.localMeta, true
+	}
+	return Lookup(t.resource)
 }
 
 // AddListener registers a TableListener to receive model events.
@@ -89,7 +124,7 @@ func (t *Table) HasNextPage() bool {
 // Returns an error only if the initial fetch fails; subsequent tick failures
 // are delivered to listeners via TableLoadFailed.
 func (t *Table) Watch(ctx context.Context) error {
-	meta, ok := Lookup(t.resource)
+	meta, ok := t.resolveMeta()
 	if !ok {
 		return nil
 	}
@@ -136,7 +171,7 @@ func (t *Table) Stop() {
 // Safe to call from any goroutine; the actual fetch runs in a background
 // goroutine so the caller (typically a UI input handler) doesn't block.
 func (t *Table) LoadNextPage() {
-	meta, ok := Lookup(t.resource)
+	meta, ok := t.resolveMeta()
 	if !ok {
 		return
 	}

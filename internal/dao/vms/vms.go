@@ -205,11 +205,14 @@ func getInstance(ctx context.Context, project, zone, name string) (*computepb.In
 	})
 }
 
-// DescribeYAML implements dao.YAMLDescriber. id is the instance self-link.
-func (v *VMs) DescribeYAML(ctx context.Context, id string) (string, error) {
-	project, zone, name := parseSelfLink(id)
+// GetInstanceYAML fetches the Compute Engine instance identified by the
+// given self-link and renders it as YAML. Exported so other DAOs (e.g.
+// miginstances) can describe a managed instance without re-implementing
+// self-link parsing and the Get/marshal pipeline.
+func GetInstanceYAML(ctx context.Context, selfLink string) (string, error) {
+	project, zone, name := parseSelfLink(selfLink)
 	if project == "" || zone == "" || name == "" {
-		return "", fmt.Errorf("vms: cannot parse self-link: %q", id)
+		return "", fmt.Errorf("vms: cannot parse self-link: %q", selfLink)
 	}
 	inst, err := getInstance(ctx, project, zone, name)
 	if err != nil {
@@ -220,6 +223,11 @@ func (v *VMs) DescribeYAML(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("vms: %w", err)
 	}
 	return out, nil
+}
+
+// DescribeYAML implements dao.YAMLDescriber. id is the instance self-link.
+func (v *VMs) DescribeYAML(ctx context.Context, id string) (string, error) {
+	return GetInstanceYAML(ctx, id)
 }
 
 // Delete issues a delete on the given Compute Engine instance.

@@ -3,7 +3,10 @@ package ui
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/brekol/g9s/internal/dao"
+	"github.com/brekol/g9s/internal/dao/miginstances"
 	"github.com/brekol/g9s/internal/dao/migs"
 	"github.com/gdamore/tcell/v2"
 )
@@ -11,9 +14,11 @@ import (
 // MIGsView is the tview page for Compute Engine Managed Instance Groups.
 //
 // All lifecycle, rendering, and Filterable/ResourceView/TableListener glue is
-// inherited from the embedded *ResourceTable. Adds an 'e' binding to open a
-// describe overlay listing recent per-instance errors for the selected MIG
-// (equivalent to `gcloud compute instance-groups managed list-errors`).
+// inherited from the embedded *ResourceTable. Adds:
+//   - 'e' opens a DescribeView listing the MIG's recent per-instance errors.
+//   - 'i' opens a TableOverlay drilling into the MIG's managed instances,
+//     from which 'l' opens a streaming Cloud Logging overlay for the
+//     selected instance.
 type MIGsView struct {
 	*ResourceTable
 
@@ -42,13 +47,17 @@ func NewMIGsView(a *App, project string) *MIGsView {
 // y/c are advertised by the global dispatcher.
 func (v *MIGsView) Hints() []Hint {
 	return []Hint{
+		{Key: "i", Desc: "Instances"},
 		{Key: "e", Desc: "Errors"},
 	}
 }
 
 // HandleKey implements KeyHandler.
 func (v *MIGsView) HandleKey(event *tcell.EventKey) bool {
-	if event.Rune() == 'e' {
+	switch event.Rune() {
+	case 'i':
+		return v.openInstances()
+	case 'e':
 		return v.openErrors()
 	}
 	return false
@@ -71,5 +80,49 @@ func (v *MIGsView) openErrors() bool {
 	})
 	dv.EnableCopy("Copy errors")
 	v.app.PushOverlay(dv)
+	return true
+}
+
+// openInstances pushes a TableOverlay listing the managed instances of the
+// selected MIG. The overlay registers an 'l' RowAction that opens a
+// streaming logs overlay for the selected instance, stacking on top.
+func (v *MIGsView) openInstances() bool {
+	row := v.SelectedRow()
+	if row == nil {
+		return true
+	}
+	mr, ok := row.(*migs.MIGRow)
+	if !ok || mr.Name == "" {
+		return true
+	}
+
+	d := &miginstances.MIGInstances{
+		Project:  mr.Project,
+		Location: mr.Location,
+		Name:     mr.Name,
+		Scope:    mr.Scope,
+	}
+
+	// Inline-meta resource view: not in model.Registry because the DAO is
+	// parameterised by the parent MIG. RefreshRate is shorter than the
+	// MIGs view (10s) since the user is actively watching a single group.
+	rt := NewResourceViewWithMeta(
+		v.app, mr.Project, "miginstances",
+		fmt.Sprintf("Instances – %s (%s)", mr.Name, mr.Location),
+		"managed instances",
+		d,
+		10*time.Second,
+	)
+
+	to := NewTableOverlay(v.app, fmt.Sprintf("Instances – %s (%s)", mr.Name, mr.Location), rt)
+	to.AddAction('l', "Logs", func(a *App, r dao.Row) {
+		ir, ok := r.(*miginstances.ManagedInstanceRow)
+		if !ok {
+			return
+		}
+		openInstanceLogs(a, ir.Project, ir.NumericID, ir.Name)
+	})
+
+	v.app.PushOverlay(to)
 	return true
 }

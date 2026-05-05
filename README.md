@@ -16,7 +16,8 @@ terminal.
 - **Build History** — list executions, stream build logs (GCS or Cloud Logging),
   cancel in-flight builds.
 - **Compute Engine** — list VMs, view live logs, delete instances.
-- **Managed Instance Groups** — list zonal and regional MIGs, view their YAML.
+- **Managed Instance Groups** — list zonal and regional MIGs, view their YAML,
+  drill into managed instances and stream their logs.
 - **Secret Manager** — list secrets, view the latest version, copy values.
 - Generic `y` (YAML describe) and `c` (copy ID) bindings on every resource.
 - Live filtering with `/`, command palette with `:`.
@@ -81,7 +82,9 @@ Inside g9s:
 
 Resource-specific bindings (e.g. `e` to edit a Cloud Run service, `l` for logs,
 `Ctrl-D` to delete a VM, `t` to run a Cloud Build trigger, `C` to cancel a
-build, `v` to reveal a secret) are listed in the header hint bar.
+build, `v` to reveal a secret, `i` to drill into a MIG's managed instances,
+`e` to view MIG errors) are listed in the header hint bar. Inside the MIG
+instance overlay, `l` opens streaming Cloud Logging for the selected instance.
 
 ## Configuration
 

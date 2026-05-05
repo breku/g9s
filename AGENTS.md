@@ -27,27 +27,31 @@ internal/
   gcp/clients.go     lazily-cached GCP clients (sync.Once + generic gcpClient[T])
   dao/               data access layer
     types.go         Accessor, Row, TableData, RowType, YAMLDescriber
-    util.go          FormatTime, LastSegment
+    util.go          FormatTime, LastSegment, JSONToYAML, ObjectToYAML, YAMLToJSON
     cloudrun/        Cloud Run v2 services (+ YAMLDescriber, UpdateServiceFromYAML)
     cloudbuild/      Cloud Build triggers (+ RunTrigger)
     buildhistory/    Cloud Build executions (+ CancelBuild)
-    vms/             Compute Engine instances (+ Delete, YAMLDescriber)
-    migs/            Managed Instance Groups, zonal+regional (+ YAMLDescriber)
+    vms/             Compute Engine instances (+ Delete, YAMLDescriber, GetInstanceYAML)
+    migs/            Managed Instance Groups, zonal+regional (+ YAMLDescriber, ListErrors)
+    miginstances/    Members of a single MIG; parameterised drill-down (NOT in registry)
     secrets/         Secret Manager (+ AccessLatestSecret)
     logs/            Cloud Logging helpers (used by overlays, not in registry)
   model/             observer-pattern polling layer
     types.go         TableListener, ResourceMeta, DefaultPageSize=50
-    table.go         Table: polling, pagination, merge-on-refresh
+    table.go         Table: polling, pagination, merge-on-refresh; NewTableWithMeta for parameterised DAOs
     registry.go      Registry, Aliases, Resolve, CompleteCommand
   ui/                tview UI
-    app.go           App: tview.Application wrapper, view cache, overlay stack,
+    app.go           App: tview.Application wrapper, view cache, overlay STACK,
                      status bar, command bar, key dispatch
     views.go         ResourceView, Overlay, Hint, HintProvider, Filterable,
                      KeyHandler interfaces; newResourceView factory
-    table.go         ResourceTable: reusable component every view embeds
+    table.go         ResourceTable: reusable component every view embeds;
+                     NewResourceViewWithMeta for parameterised DAOs
     actions.go       generic y/c/PgDn handler + genericHints
-    cloudrun.go vms.go cloudbuild.go buildhistory.go secrets.go   per-resource views
+    cloudrun.go vms.go cloudbuild.go buildhistory.go secrets.go migs.go   per-resource views
+    tableoverlay.go  TableOverlay: drill-down overlay wrapping a ResourceTable
     describeview.go logview.go confirmoverlay.go runoverlay.go    overlays
+    loghelpers.go    openInstanceLogs (shared by VMsView and miginstances drill-down)
     cmdbar.go header.go statusbar.go welcome.go colortheme.go yamlcolor.go
 bin/                 local build output (g9s); bin/gcptui is a stale leftover
 dist/                GoReleaser output (do not hand-edit)
@@ -115,18 +119,30 @@ goroutine rules below.
 
 - `App` wraps `tview.Application`, owns a root flex (header, cmdbar, pages,
   statusbar — rebuilt by `relayout()`), a `viewCache` keyed by resource, and
-  a single-slot overlay stack.
+  an N-deep overlay stack (`overlays []Overlay`).
 - Global key dispatch: `:` (cmdbar) and `/` (filter) → `Ctrl-C` (quit) →
   `handleGenericKey` (`y`/`c`/`PgDn`) → active view's `KeyHandler.HandleKey`.
 - `ResourceView` is the unified interface. `ResourceTable` is the embeddable
   component every concrete view uses; it wires `model.Table` + listener +
   render + filter + PgDn pagination.
 - Overlays (`Overlay`: `Primitive`, `RenderLoading`, `Start`, `OnClose`) are
-  pushed/popped via `App.PushOverlay` / `App.PopOverlay`.
+  pushed/popped via `App.PushOverlay` / `App.PopOverlay`. The stack is
+  N-deep: each push mounts on top of the previous one (e.g. MIG → instance
+  table overlay → log overlay), each pop returns to the next overlay down.
+  `popAllOverlays` drains the stack and is invoked on cmdbar resource
+  switches so `:cloudrun` from inside any overlay lands on a clean view.
+  Mouse is disabled on the first push and re-enabled only when the stack
+  empties; hints reflect the current top of the stack.
 - Hints: `Header.SetViewHints(viewHintProvider(view))` is called on every
   view/overlay change. `genericHints` advertises `y` (only if DAO is a
   `YAMLDescriber`), `c`, `PgDn`. Each view's `Hints()` returns *only* its own
   additions.
+- **Drill-down pattern** (`TableOverlay`): wraps a ResourceTable as an
+  Overlay so a parent resource can drill into a child table without making
+  the child a top-level resource. Generic `y`/`c` and `q`/`Esc` handling
+  lives in TableOverlay because the global key dispatcher is bypassed
+  while any overlay is active. Custom row actions (e.g. `l` for logs) are
+  registered via `TableOverlay.AddAction(key, hintLabel, fn)`.
 
 ## Adding a new resource
 
@@ -229,11 +245,18 @@ to the user before adding test scaffolding.
 - **Adding a resource touches three files**: `internal/model/registry.go`
   (Registry + Aliases), `internal/ui/views.go` (factory switch), and the new
   DAO + view files.
+- **Parameterised drill-down resources** (no project-only constructor —
+  e.g. `miginstances` scoped to a parent MIG) skip the registry entirely.
+  Use `model.NewTableWithMeta` + `ui.NewResourceViewWithMeta` to construct
+  them imperatively from the parent view, and wrap the ResourceTable in a
+  `TableOverlay` to push it as a drill-down. Do NOT add such resources to
+  the cmdbar aliases — they are not navigable from `:`.
 - **Architectural backbone files** — modify only when intentionally extending
   the framework, since changes ripple through every resource:
   - `internal/dao/types.go`
   - `internal/model/table.go`, `internal/model/types.go`
-  - `internal/ui/app.go`, `internal/ui/table.go`, `internal/ui/views.go`
+  - `internal/ui/app.go`, `internal/ui/table.go`, `internal/ui/views.go`,
+    `internal/ui/tableoverlay.go`
 - **`dist/` is generated** by GoReleaser. **`bin/gcptui`** is a stale binary
   from before the rename — ignore it.
 - **Page size is uniform** (`model.DefaultPageSize = 50`). If a future

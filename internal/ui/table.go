@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/model"
@@ -71,6 +72,26 @@ func NewResourceView(
 	accessor dao.Accessor,
 ) *ResourceTable {
 	mdl := model.NewTable(resourceKey, project)
+	rt := newResourceTable(app, title, loadingLabel, accessor, mdl)
+	mdl.AddListener(rt)
+	return rt
+}
+
+// NewResourceViewWithMeta builds a ResourceTable whose model.Table is
+// constructed with an inline ResourceMeta (DAO + RefreshRate) instead of
+// going through the global model.Registry. Used by parameterised drill-down
+// resources (e.g. miginstances) that don't fit the registry's
+// project-only-constructor shape.
+func NewResourceViewWithMeta(
+	app *App,
+	project, resourceKey, title, loadingLabel string,
+	accessor dao.Accessor,
+	refreshRate time.Duration,
+) *ResourceTable {
+	mdl := model.NewTableWithMeta(resourceKey, project, model.ResourceMeta{
+		DAO:         accessor,
+		RefreshRate: refreshRate,
+	})
 	rt := newResourceTable(app, title, loadingLabel, accessor, mdl)
 	mdl.AddListener(rt)
 	return rt
