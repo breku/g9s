@@ -194,6 +194,71 @@ func rowFromMIG(mig *computepb.InstanceGroupManager) *MIGRow {
 	}
 }
 
+// ListErrors fetches the recent per-instance errors reported by the MIG's
+// managed instance controller, formatted as a YAML document for display.
+// Routes to the zonal or regional ListErrors RPC based on the parsed
+// self-link. Returns "(no errors)" when the MIG has no recorded errors.
+func (m *MIGs) ListErrors(ctx context.Context, id string) (string, error) {
+	project, location, scope := parseSelfLink(id)
+	name := dao.LastSegment(id)
+	if project == "" || location == "" || name == "" {
+		return "", fmt.Errorf("migs: cannot parse self-link: %q", id)
+	}
+
+	var errs []*computepb.InstanceManagedByIgmError
+	switch scope {
+	case ScopeRegional:
+		client, err := gcp.RegionInstanceGroupManagersClient()
+		if err != nil {
+			return "", fmt.Errorf("migs: client: %w", err)
+		}
+		it := client.ListErrors(ctx, &computepb.ListErrorsRegionInstanceGroupManagersRequest{
+			Project:              project,
+			Region:               location,
+			InstanceGroupManager: name,
+		})
+		for {
+			e, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				return "", fmt.Errorf("migs: list errors regional: %w", err)
+			}
+			errs = append(errs, e)
+		}
+	default:
+		client, err := gcp.InstanceGroupManagersClient()
+		if err != nil {
+			return "", fmt.Errorf("migs: client: %w", err)
+		}
+		it := client.ListErrors(ctx, &computepb.ListErrorsInstanceGroupManagersRequest{
+			Project:              project,
+			Zone:                 location,
+			InstanceGroupManager: name,
+		})
+		for {
+			e, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				return "", fmt.Errorf("migs: list errors zonal: %w", err)
+			}
+			errs = append(errs, e)
+		}
+	}
+
+	if len(errs) == 0 {
+		return "(no errors)\n", nil
+	}
+	out, err := dao.ObjectToYAML(errs)
+	if err != nil {
+		return "", fmt.Errorf("migs: %w", err)
+	}
+	return out, nil
+}
+
 // DescribeYAML implements dao.YAMLDescriber. id is the MIG self-link.
 // Routes to the zonal or regional Get RPC based on the parsed self-link.
 func (m *MIGs) DescribeYAML(ctx context.Context, id string) (string, error) {
