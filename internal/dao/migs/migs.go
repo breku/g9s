@@ -10,7 +10,6 @@ package migs
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
 	"google.golang.org/api/iterator"
-	"gopkg.in/yaml.v3"
 )
 
 // Ensure MIGs satisfies Accessor and MIGRow satisfies Row at compile time.
@@ -237,23 +235,15 @@ func (m *MIGs) DescribeYAML(ctx context.Context, id string) (string, error) {
 	}
 }
 
-// marshalYAML renders a proto message as YAML by going through JSON, the
-// same trick used by vms.DescribeYAML so field names match the proto JSON
-// representation users see in `gcloud ... --format=yaml`.
+// marshalYAML renders a value as YAML by going through JSON first, so field
+// names match the JSON representation users see in `gcloud ... --format=yaml`
+// rather than the underlying Go struct field names.
 func marshalYAML(v interface{}) (string, error) {
-	jsonBytes, err := json.Marshal(v)
+	out, err := dao.ObjectToYAML(v)
 	if err != nil {
-		return "", fmt.Errorf("migs: marshal json: %w", err)
+		return "", fmt.Errorf("migs: %w", err)
 	}
-	var m interface{}
-	if err := json.Unmarshal(jsonBytes, &m); err != nil {
-		return "", fmt.Errorf("migs: unmarshal json: %w", err)
-	}
-	yamlBytes, err := yaml.Marshal(m)
-	if err != nil {
-		return "", fmt.Errorf("migs: marshal yaml: %w", err)
-	}
-	return string(yamlBytes), nil
+	return out, nil
 }
 
 // parseSelfLink extracts (project, location, scope) from a MIG self-link.

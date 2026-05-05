@@ -3,7 +3,6 @@ package vms
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/brekol/g9s/internal/dao"
 	"github.com/brekol/g9s/internal/gcp"
 	"google.golang.org/api/iterator"
-	"gopkg.in/yaml.v3"
 )
 
 // Ensure VMs satisfies Accessor and InstanceRow satisfies Row at compile time.
@@ -217,19 +215,11 @@ func (v *VMs) DescribeYAML(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	jsonBytes, err := json.Marshal(inst)
+	out, err := dao.ObjectToYAML(inst)
 	if err != nil {
-		return "", fmt.Errorf("vms: marshal json: %w", err)
+		return "", fmt.Errorf("vms: %w", err)
 	}
-	var m interface{}
-	if err := json.Unmarshal(jsonBytes, &m); err != nil {
-		return "", fmt.Errorf("vms: unmarshal json: %w", err)
-	}
-	yamlBytes, err := yaml.Marshal(m)
-	if err != nil {
-		return "", fmt.Errorf("vms: marshal yaml: %w", err)
-	}
-	return string(yamlBytes), nil
+	return out, nil
 }
 
 // Delete issues a delete on the given Compute Engine instance.

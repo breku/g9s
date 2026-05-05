@@ -3,7 +3,6 @@ package cloudrun
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/brekol/g9s/internal/gcp"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/encoding/protojson"
-	"gopkg.in/yaml.v3"
 )
 
 // Ensure CloudRun satisfies Accessor and ServiceRow satisfies Row at compile time.
@@ -180,15 +178,11 @@ func (c *CloudRun) DescribeYAML(ctx context.Context, id string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("cloudrun: marshal json: %w", err)
 	}
-	var m interface{}
-	if err := json.Unmarshal(jsonBytes, &m); err != nil {
-		return "", fmt.Errorf("cloudrun: unmarshal json: %w", err)
-	}
-	yamlBytes, err := yaml.Marshal(m)
+	out, err := dao.JSONToYAML(jsonBytes)
 	if err != nil {
-		return "", fmt.Errorf("cloudrun: marshal yaml: %w", err)
+		return "", fmt.Errorf("cloudrun: %w", err)
 	}
-	return string(yamlBytes), nil
+	return out, nil
 }
 
 // UpdateServiceFromYAML parses the given YAML representation of a Cloud Run
@@ -205,13 +199,9 @@ func (c *CloudRun) DescribeYAML(ctx context.Context, id string) (string, error) 
 //
 // The service name embedded in the YAML identifies the target service.
 func (c *CloudRun) UpdateServiceFromYAML(ctx context.Context, yamlStr string) (wait func(context.Context) error, err error) {
-	var m interface{}
-	if err := yaml.Unmarshal([]byte(yamlStr), &m); err != nil {
-		return nil, fmt.Errorf("cloudrun: parse yaml: %w", err)
-	}
-	jsonBytes, err := json.Marshal(m)
+	jsonBytes, err := dao.YAMLToJSON(yamlStr)
 	if err != nil {
-		return nil, fmt.Errorf("cloudrun: marshal json: %w", err)
+		return nil, fmt.Errorf("cloudrun: %w", err)
 	}
 	svc := &runpb.Service{}
 	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(jsonBytes, svc); err != nil {
