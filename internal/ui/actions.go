@@ -37,9 +37,9 @@ type rowSelector interface {
 // genericHints returns hints for the keys handled by handleGenericKey,
 // gated on the current view's DAO capabilities. 'c' is always advertised
 // because every Row implements CopyColumnValue (it may no-op at runtime).
-// PgDn is always advertised because every ResourceView paginates uniformly
-// through model.Table; resources that fit in a single page simply have
-// nothing more to load.
+// PgDn is intentionally NOT advertised here — the table itself shows a
+// "↓ PageDown to load more…" footer when more pages are available, which
+// is sufficient and avoids cluttering the header.
 func genericHints(view ResourceView) []Hint {
 	if view == nil {
 		return nil
@@ -49,10 +49,7 @@ func genericHints(view ResourceView) []Hint {
 	if _, ok := d.(dao.YAMLDescriber); ok {
 		hints = append(hints, Hint{Key: "y", Desc: "YAML"})
 	}
-	hints = append(hints,
-		Hint{Key: "c", Desc: "Copy"},
-		Hint{Key: "PgDn", Desc: "Next page"},
-	)
+	hints = append(hints, Hint{Key: "c", Desc: "Copy"})
 	return hints
 }
 
