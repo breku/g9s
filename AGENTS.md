@@ -32,6 +32,7 @@ internal/
     cloudbuild/      Cloud Build triggers (+ RunTrigger)
     buildhistory/    Cloud Build executions (+ CancelBuild)
     vms/             Compute Engine instances (+ Delete, YAMLDescriber)
+    migs/            Managed Instance Groups, zonal+regional (+ YAMLDescriber)
     secrets/         Secret Manager (+ AccessLatestSecret)
     logs/            Cloud Logging helpers (used by overlays, not in registry)
   model/             observer-pattern polling layer

@@ -16,6 +16,7 @@ terminal.
 - **Build History** — list executions, stream build logs (GCS or Cloud Logging),
   cancel in-flight builds.
 - **Compute Engine** — list VMs, view live logs, delete instances.
+- **Managed Instance Groups** — list zonal and regional MIGs, view their YAML.
 - **Secret Manager** — list secrets, view the latest version, copy values.
 - Generic `y` (YAML describe) and `c` (copy ID) bindings on every resource.
 - Live filtering with `/`, command palette with `:`.
@@ -71,7 +72,7 @@ Inside g9s:
 | Key       | Action                                |
 |-----------|---------------------------------------|
 | `:`       | Open command palette                  |
-| `:cloudrun`, `:vms`, `:secrets`, `:triggers`, `:buildhistory` | Open a resource view |
+| `:cloudrun`, `:vms`, `:migs`, `:secrets`, `:triggers`, `:buildhistory` | Open a resource view |
 | `/`       | Filter rows in the active view        |
 | `y`       | Show YAML for the selected row        |
 | `c`       | Copy the row's ID to the clipboard    |

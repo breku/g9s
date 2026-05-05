@@ -94,6 +94,8 @@ func newResourceView(a *App, resource, project string) ResourceView {
 		return NewBuildHistoryView(a, project)
 	case "vms":
 		return NewVMsView(a, project)
+	case "migs":
+		return NewMIGsView(a, project)
 	case "secrets":
 		return NewSecretsView(a, project)
 	default:

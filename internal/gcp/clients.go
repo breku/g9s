@@ -71,12 +71,14 @@ func credsOption() ([]option.ClientOption, error) {
 }
 
 var (
-	cloudBuild       gcpClient[*cloudbuild.Client]
-	cloudRun         gcpClient[*run.ServicesClient]
-	computeInstances gcpClient[*compute.InstancesClient]
-	secretManager    gcpClient[*secretmanager.Client]
-	cloudLogging     gcpClient[*logging.Client]
-	gcs              gcpClient[*storage.Client]
+	cloudBuild         gcpClient[*cloudbuild.Client]
+	cloudRun           gcpClient[*run.ServicesClient]
+	computeInstances   gcpClient[*compute.InstancesClient]
+	instanceGroupMgrs  gcpClient[*compute.InstanceGroupManagersClient]
+	regionInstanceGMgr gcpClient[*compute.RegionInstanceGroupManagersClient]
+	secretManager      gcpClient[*secretmanager.Client]
+	cloudLogging       gcpClient[*logging.Client]
+	gcs                gcpClient[*storage.Client]
 )
 
 // CloudBuildClient returns the process-wide cached Cloud Build client.
@@ -109,6 +111,33 @@ func ComputeInstancesClient() (*compute.InstancesClient, error) {
 			return nil, err
 		}
 		return compute.NewInstancesRESTClient(context.Background(), opts...)
+	})
+}
+
+// InstanceGroupManagersClient returns the process-wide cached zonal Managed
+// Instance Group client. Used together with RegionInstanceGroupManagersClient
+// to cover both zonal and regional MIGs (each have their own API surface; the
+// aggregated list lives on the zonal client).
+func InstanceGroupManagersClient() (*compute.InstanceGroupManagersClient, error) {
+	return instanceGroupMgrs.get(func() (*compute.InstanceGroupManagersClient, error) {
+		opts, err := credsOption()
+		if err != nil {
+			return nil, err
+		}
+		return compute.NewInstanceGroupManagersRESTClient(context.Background(), opts...)
+	})
+}
+
+// RegionInstanceGroupManagersClient returns the process-wide cached regional
+// Managed Instance Group client. Used by DescribeYAML to fetch a single
+// regional MIG; aggregated listing comes from InstanceGroupManagersClient.
+func RegionInstanceGroupManagersClient() (*compute.RegionInstanceGroupManagersClient, error) {
+	return regionInstanceGMgr.get(func() (*compute.RegionInstanceGroupManagersClient, error) {
+		opts, err := credsOption()
+		if err != nil {
+			return nil, err
+		}
+		return compute.NewRegionInstanceGroupManagersRESTClient(context.Background(), opts...)
 	})
 }
 

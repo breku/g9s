@@ -8,6 +8,7 @@ import (
 	"github.com/brekol/g9s/internal/dao/buildhistory"
 	"github.com/brekol/g9s/internal/dao/cloudbuild"
 	"github.com/brekol/g9s/internal/dao/cloudrun"
+	"github.com/brekol/g9s/internal/dao/migs"
 	"github.com/brekol/g9s/internal/dao/secrets"
 	"github.com/brekol/g9s/internal/dao/vms"
 )
@@ -22,6 +23,7 @@ var Registry = map[string]ResourceMeta{
 	"cloudbuild":   {DAO: new(cloudbuild.CloudBuild), RefreshRate: 30 * time.Second},
 	"buildhistory": {DAO: new(buildhistory.BuildHistory), RefreshRate: 5 * time.Second},
 	"vms":          {DAO: new(vms.VMs), RefreshRate: 30 * time.Second},
+	"migs":         {DAO: new(migs.MIGs), RefreshRate: 30 * time.Second},
 	"secrets":      {DAO: new(secrets.Secrets), RefreshRate: 60 * time.Second},
 }
 
@@ -32,6 +34,7 @@ var Aliases = map[string]string{
 	"triggers":     "cloudbuild",
 	"buildhistory": "buildhistory",
 	"vms":          "vms",
+	"migs":         "migs",
 	"secrets":      "secrets",
 	"q":            "_quit",
 	"quit":         "_quit",
