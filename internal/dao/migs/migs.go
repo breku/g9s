@@ -166,14 +166,7 @@ func rowFromMIG(mig *computepb.InstanceGroupManager) *MIGRow {
 		rowType = dao.RowTypeNotActive
 	}
 
-	created := "—"
-	if ts := mig.GetCreationTimestamp(); ts != "" {
-		if i := strings.Index(ts, "T"); i > 0 && len(ts) >= i+6 {
-			created = ts[:i] + " " + ts[i+1:i+6]
-		} else {
-			created = ts
-		}
-	}
+	created := dao.ParseAndFormatTimestamp(mig.GetCreationTimestamp())
 
 	return &MIGRow{
 		id:       self,

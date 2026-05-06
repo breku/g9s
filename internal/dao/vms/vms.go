@@ -125,14 +125,7 @@ func rowFromInstance(inst *computepb.Instance) *InstanceRow {
 
 	internalIP, externalIP := instanceIPs(inst)
 
-	created := "—"
-	if ts := inst.GetCreationTimestamp(); ts != "" {
-		if i := strings.Index(ts, "T"); i > 0 && len(ts) >= i+6 {
-			created = ts[:i] + " " + ts[i+1:i+6]
-		} else {
-			created = ts
-		}
-	}
+	created := dao.ParseAndFormatTimestamp(inst.GetCreationTimestamp())
 
 	colType := dao.RowTypeNotActive
 	switch status {

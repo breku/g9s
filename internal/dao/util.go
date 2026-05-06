@@ -18,6 +18,22 @@ func FormatTime(t time.Time) string {
 	return t.Local().Format("2006-01-02 15:04")
 }
 
+// ParseAndFormatTimestamp parses an RFC 3339 timestamp string (as returned
+// by GCP Compute Engine APIs) and formats it in the local timezone using the
+// same "2006-01-02 15:04" layout as FormatTime. Returns "—" for empty input
+// or unparseable values.
+func ParseAndFormatTimestamp(ts string) string {
+	if ts == "" {
+		return "—"
+	}
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		// Fall back to the raw string if parsing fails.
+		return ts
+	}
+	return t.Local().Format("2006-01-02 15:04")
+}
+
 // LastSegment returns the last "/" segment of a fully-qualified resource name.
 // e.g. "projects/p/locations/l/services/foo" → "foo"
 // Exported for use by subpackage DAOs.
