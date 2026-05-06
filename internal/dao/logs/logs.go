@@ -14,11 +14,22 @@ import (
 )
 
 // FetchCloudLoggingPage fetches log text entries matching filter from the
-// Cloud Logging API for the given project.
-func FetchCloudLoggingPage(ctx context.Context, project, filter, since, afterInsertID string) (lines []string, lastInsertID, lastTimestamp string, err error) {
+// Cloud Logging API for the given project, returning entries strictly newer
+// than the (since, seenInsertIDs) cursor.
+//
+// since is an RFC3339Nano timestamp lower bound (inclusive in the API filter,
+// but entries at exactly that timestamp are deduplicated against
+// seenInsertIDs). seenInsertIDs is the set of InsertIds that share the
+// `since` timestamp from the previous page — they're skipped to avoid
+// duplicating already-displayed lines when a new entry arrives at the same
+// nanosecond as the previous newest.
+//
+// Returns the new lines, the InsertIds at the new latest timestamp (for the
+// next call's seenInsertIDs), and the new latest timestamp.
+func FetchCloudLoggingPage(ctx context.Context, project, filter, since string, seenInsertIDs map[string]struct{}) (lines []string, newLatestIDs map[string]struct{}, newLatestTimestamp string, err error) {
 	client, err := gcp.LoggingClient()
 	if err != nil {
-		return nil, afterInsertID, since, fmt.Errorf("logs: logging client: %w", err)
+		return nil, seenInsertIDs, since, fmt.Errorf("logs: logging client: %w", err)
 	}
 
 	fullFilter := filter
@@ -30,52 +41,66 @@ func FetchCloudLoggingPage(ctx context.Context, project, filter, since, afterIns
 		ResourceNames: []string{"projects/" + project},
 		Filter:        fullFilter,
 		OrderBy:       "timestamp asc",
-		PageSize:      200,
+		PageSize:      500,
 	})
 
-	entries, _, fetchErr := it.InternalFetch(200, "")
+	entries, _, fetchErr := it.InternalFetch(500, "")
 	if fetchErr != nil {
 		if ctx.Err() == nil {
 			log.Error().Err(fetchErr).Str("project", project).Msg("logs: cloud logging fetch")
 		}
-		return nil, afterInsertID, since, fmt.Errorf("logs: fetch: %w", fetchErr)
+		return nil, seenInsertIDs, since, fmt.Errorf("logs: fetch: %w", fetchErr)
 	}
 
-	lastInsertID = afterInsertID
-	lastTimestamp = since
-	found := (afterInsertID == "")
+	newLatestTimestamp = since
+	newLatestIDs = seenInsertIDs
 
 	for _, entry := range entries {
-		if !found {
-			if entry.InsertId == afterInsertID {
-				found = true
-			}
+		// Skip entries already seen on a previous page (same timestamp as cursor).
+		if _, seen := seenInsertIDs[entry.InsertId]; seen {
 			continue
 		}
-		if entry.Timestamp != nil {
-			if t := entry.Timestamp.AsTime(); t.After(time.Time{}) {
-				lastTimestamp = t.UTC().Format(time.RFC3339Nano)
-			}
-		}
 		text := entryText(entry)
-		if text != "" {
-			if !strings.HasSuffix(text, "\n") {
-				text += "\n"
+		if text == "" {
+			continue
+		}
+		if !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		lines = append(lines, text)
+
+		ts := ""
+		if entry.Timestamp != nil {
+			ts = entry.Timestamp.AsTime().UTC().Format(time.RFC3339Nano)
+		}
+		// Track the InsertIds at the new latest timestamp so the next poll
+		// can dedup entries with the exact same timestamp.
+		if ts != "" {
+			if ts != newLatestTimestamp {
+				newLatestTimestamp = ts
+				newLatestIDs = map[string]struct{}{entry.InsertId: {}}
+			} else {
+				if newLatestIDs == nil {
+					newLatestIDs = map[string]struct{}{}
+				}
+				newLatestIDs[entry.InsertId] = struct{}{}
 			}
-			lines = append(lines, text)
-			lastInsertID = entry.InsertId
 		}
 	}
 
-	return lines, lastInsertID, lastTimestamp, nil
+	return lines, newLatestIDs, newLatestTimestamp, nil
 }
 
 // FetchCloudLoggingInitial fetches the most recent log entries fast by querying
 // in descending order and reversing the result for display.
-func FetchCloudLoggingInitial(ctx context.Context, project, filter, since string, pageSize int32) (lines []string, oldestTimestamp, newestInsertID string, err error) {
+//
+// Returns the rendered lines (oldest first), the timestamp of the newest entry
+// seen (suitable as the `since` lower bound for polling), and the set of
+// InsertIds at that newest timestamp (so polling can dedup).
+func FetchCloudLoggingInitial(ctx context.Context, project, filter, since string, pageSize int32) (lines []string, newestTimestamp string, newestInsertIDs map[string]struct{}, err error) {
 	client, err := gcp.LoggingClient()
 	if err != nil {
-		return nil, since, "", fmt.Errorf("logs: logging client: %w", err)
+		return nil, since, nil, fmt.Errorf("logs: logging client: %w", err)
 	}
 
 	fullFilter := filter
@@ -95,17 +120,28 @@ func FetchCloudLoggingInitial(ctx context.Context, project, filter, since string
 		if ctx.Err() == nil {
 			log.Error().Err(err).Str("project", project).Msg("logs: initial fetch")
 		}
-		return nil, since, "", fmt.Errorf("logs: initial fetch: %w", err)
+		return nil, since, nil, fmt.Errorf("logs: initial fetch: %w", err)
 	}
 
 	if len(entries) == 0 {
-		return nil, since, "", nil
+		return nil, since, nil, nil
 	}
 
-	newestInsertID = entries[0].InsertId
-	oldestTimestamp = since
-	if entries[len(entries)-1].Timestamp != nil {
-		oldestTimestamp = entries[len(entries)-1].Timestamp.AsTime().UTC().Format(time.RFC3339Nano)
+	// Newest entry sits first in desc order. Capture its timestamp and all
+	// InsertIds that share that exact timestamp so polling can dedup them.
+	if entries[0].Timestamp != nil {
+		newestTimestamp = entries[0].Timestamp.AsTime().UTC().Format(time.RFC3339Nano)
+	}
+	newestInsertIDs = map[string]struct{}{}
+	for _, e := range entries {
+		ts := ""
+		if e.Timestamp != nil {
+			ts = e.Timestamp.AsTime().UTC().Format(time.RFC3339Nano)
+		}
+		if ts != newestTimestamp {
+			break
+		}
+		newestInsertIDs[e.InsertId] = struct{}{}
 	}
 
 	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
@@ -123,7 +159,7 @@ func FetchCloudLoggingInitial(ctx context.Context, project, filter, since string
 		lines = append(lines, text)
 	}
 
-	return lines, oldestTimestamp, newestInsertID, nil
+	return lines, newestTimestamp, newestInsertIDs, nil
 }
 
 // FetchGCSRange reads bytes from a GCS object starting at byteOffset.

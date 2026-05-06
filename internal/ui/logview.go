@@ -255,7 +255,7 @@ func (lv *LogView) streamCloudLogging(ctx context.Context) {
 	}
 
 	// --- Initial load: fetch desc, reversed — fast even on busy services ---
-	lines, pollSince, newestInsertID, err := logs.FetchCloudLoggingInitial(ctx, lv.cfg.Project, lv.cfg.LogFilter, lv.cfg.LogSince, pageSize)
+	lines, newestTimestamp, newestInsertIDs, err := logs.FetchCloudLoggingInitial(ctx, lv.cfg.Project, lv.cfg.LogFilter, lv.cfg.LogSince, pageSize)
 	if err != nil && ctx.Err() == nil {
 		log.Error().Err(err).Str("title", lv.cfg.Title).Msg("logview: initial fetch")
 	}
@@ -280,11 +280,16 @@ func (lv *LogView) streamCloudLogging(ctx context.Context) {
 	}
 
 	// --- Poll: asc from the newest entry seen so far ---
-	since := pollSince
-	lastInsertID := newestInsertID
+	// If the initial fetch returned nothing, fall back to LogSince so we don't
+	// poll the entire retention window every 2s.
+	since := newestTimestamp
+	if since == "" {
+		since = lv.cfg.LogSince
+	}
+	seenIDs := newestInsertIDs
 
 	poll := func() {
-		newLines, newLastID, newSince, pollErr := logs.FetchCloudLoggingPage(ctx, lv.cfg.Project, lv.cfg.LogFilter, since, lastInsertID)
+		newLines, newSeenIDs, newSince, pollErr := logs.FetchCloudLoggingPage(ctx, lv.cfg.Project, lv.cfg.LogFilter, since, seenIDs)
 		if pollErr != nil {
 			if ctx.Err() == nil {
 				log.Error().Err(pollErr).Str("title", lv.cfg.Title).Msg("logview: poll fetch")
@@ -293,7 +298,7 @@ func (lv *LogView) streamCloudLogging(ctx context.Context) {
 		}
 		if len(newLines) > 0 {
 			since = newSince
-			lastInsertID = newLastID
+			seenIDs = newSeenIDs
 			content := stripAnsi(strings.Join(newLines, ""))
 			lv.app.tview.QueueUpdateDraw(func() {
 				lv.appendContent(content)
