@@ -15,7 +15,7 @@ terminal.
 - **Cloud Build** — list triggers, run a trigger on a chosen branch.
 - **Build History** — list executions, stream build logs (GCS or Cloud Logging),
   cancel in-flight builds.
-- **Compute Engine** — list VMs, view live logs, delete instances.
+- **Compute Engine** — list VMs, SSH into them, view live logs, delete instances.
 - **Managed Instance Groups** — list zonal and regional MIGs, view their YAML,
   drill into managed instances and stream their logs.
 - **Secret Manager** — list secrets, view the latest version, copy values.
