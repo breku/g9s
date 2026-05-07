@@ -32,8 +32,12 @@ resources. Similar to k9s but for GCP.`,
 		}
 		// Redirect os.Stderr to the log file so that any third-party
 		// library (gRPC, oauth2, etc.) writing directly to stderr does
-		// not corrupt the tview screen.
+		// not corrupt the tview screen. The original stderr is preserved
+		// in ui.OriginalStderr so handlers that intentionally suspend
+		// the TUI (e.g. $EDITOR, gcloud compute ssh) can route the child
+		// process's stderr back to the real terminal.
 		if logFile != nil {
+			ui.OriginalStderr = os.Stderr
 			os.Stderr = logFile
 		}
 		app := ui.New(cfg)
